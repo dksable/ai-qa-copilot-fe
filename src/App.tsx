@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Sparkles,
   Wand2,
@@ -13,6 +13,8 @@ import {
   Beaker,
   ShieldCheck,
   Rocket,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -34,6 +36,8 @@ import { cn } from "@/lib/utils";
 
 import { generateTestCases, type TestCase, type TestPlan } from "@/lib/api/testcases";
 
+type Theme = "light" | "dark";
+
 const EXAMPLE = `As a registered user, I want to reset my password via email so that I can regain access to my account if I forget my credentials.
 
 Acceptance Criteria:
@@ -43,12 +47,27 @@ Acceptance Criteria:
 - User receives confirmation email after successful reset`;
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme === "light" || savedTheme === "dark") return savedTheme;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  });
   const [requirement, setRequirement] = useState("");
   const [testType, setTestType] = useState<"functional" | "api" | "ui" | "integration">(
     "functional",
   );
   const [plan, setPlan] = useState<TestPlan | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", theme === "light");
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"));
+  };
 
   const onGenerate = async () => {
     if (requirement.trim().length < 10) {
@@ -73,7 +92,7 @@ export default function App() {
       <div className="pointer-events-none absolute inset-0 bg-gradient-hero" />
       <div className="pointer-events-none absolute -top-32 left-1/2 h-[480px] w-[900px] -translate-x-1/2 rounded-full bg-gradient-mesh blur-3xl opacity-60" />
 
-      <Nav />
+      <Nav theme={theme} onToggleTheme={toggleTheme} />
 
       <main className="relative mx-auto max-w-6xl px-6 pb-24 pt-10 lg:pt-16">
         <Hero />
@@ -152,12 +171,14 @@ export default function App() {
         </section>
       </main>
 
-      <Toaster richColors theme="dark" position="top-right" />
+      <Toaster richColors theme={theme} position="top-right" />
     </div>
   );
 }
 
-function Nav() {
+function Nav({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
+  const isDark = theme === "dark";
+
   return (
     <header className="relative z-10 border-b border-border/40 bg-background/40 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
@@ -169,17 +190,30 @@ function Nav() {
             AI QA <span className="text-gradient">Copilot</span>
           </span>
         </div>
-        <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-          <a href="#features" className="hover:text-foreground">
-            Features
-          </a>
-          <a href="#generator" className="hover:text-foreground">
-            Generator
-          </a>
-          <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
-            Powered by AI
-          </Badge>
-        </nav>
+        <div className="flex items-center gap-2 md:gap-4">
+          <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
+            <a href="#features" className="hover:text-foreground">
+              Features
+            </a>
+            <a href="#generator" className="hover:text-foreground">
+              Generator
+            </a>
+            <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
+              Powered by AI
+            </Badge>
+          </nav>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={onToggleTheme}
+            aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
+            title={`Switch to ${isDark ? "light" : "dark"} mode`}
+            className="size-9 border-border/60 bg-background/60 backdrop-blur"
+          >
+            {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </Button>
+        </div>
       </div>
     </header>
   );
