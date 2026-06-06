@@ -1,3 +1,12 @@
+import {
+  generateRegressionImpactAnalysis,
+  type RegressionImpactAnalysis,
+} from "@/lib/api/regressionImpact";
+import {
+  generateTestCoverageScoreAnalysis,
+  type TestCoverageScoreAnalysis,
+} from "@/lib/api/coverageScore";
+
 export interface TestCase {
   id: string;
   title: string;
@@ -21,6 +30,8 @@ export interface TestPlan {
   edge: TestCase[];
   testData: TestDataItem[];
   playwright: string;
+  regressionImpact: RegressionImpactAnalysis;
+  coverageAnalysis: TestCoverageScoreAnalysis;
 }
 
 export type TestFocus = "functional" | "api" | "ui" | "integration";
@@ -32,6 +43,28 @@ export interface GenerateTestCasesInput {
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+async function generateTestCasesFromBackend(
+  input: GenerateTestCasesInput,
+): Promise<TestPlan | null> {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_URL;
+  if (!apiBaseUrl) return null;
+
+  const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/generate-testcases`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new Error(errorBody?.message ?? "Backend test case generation failed.");
+  }
+
+  return (await response.json()) as TestPlan;
+}
+
 export async function generateTestCases({
   requirement,
   testType,
@@ -41,12 +74,18 @@ export async function generateTestCases({
     throw new Error("Please describe the requirement in at least 10 characters.");
   }
 
+  const backendPlan = await generateTestCasesFromBackend({
+    requirement: trimmedRequirement,
+    testType,
+  });
+  if (backendPlan) return backendPlan;
+
   await wait(650);
 
   const focusLabel = testType[0].toUpperCase() + testType.slice(1);
   const shortRequirement = trimmedRequirement.split(/\s+/).slice(0, 18).join(" ");
 
-  return {
+  const planWithoutCoverage = {
     summary: `${focusLabel} test coverage for: ${shortRequirement}${
       trimmedRequirement.length > shortRequirement.length ? "..." : ""
     }`,
@@ -212,5 +251,17 @@ test.describe("${focusLabel} requirement flow", () => {
     await expect(page.getByText(/at least 10 characters/i)).toBeVisible();
   });
 });`,
+    regressionImpact: generateRegressionImpactAnalysis({ requirement: trimmedRequirement }),
+  };
+
+  return {
+    ...planWithoutCoverage,
+    coverageAnalysis: generateTestCoverageScoreAnalysis({
+      requirement: trimmedRequirement,
+      positive: planWithoutCoverage.positive,
+      negative: planWithoutCoverage.negative,
+      edge: planWithoutCoverage.edge,
+      testData: planWithoutCoverage.testData,
+    }),
   };
 }

@@ -15,6 +15,10 @@ import {
   Rocket,
   Moon,
   Sun,
+  Layers,
+  ListChecks,
+  Gauge,
+  CircleHelp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -24,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -35,6 +40,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { generateTestCases, type TestCase, type TestPlan } from "@/lib/api/testcases";
+import type {
+  RegressionImpactAnalysis,
+  RegressionPriority,
+  RiskLevel,
+  ReleaseRecommendationStatus,
+} from "@/lib/api/regressionImpact";
+import type {
+  CoverageStatus,
+  OverallCoverageStatus,
+  TestCoverageScoreAnalysis,
+} from "@/lib/api/coverageScore";
 
 type Theme = "light" | "dark";
 
@@ -313,6 +329,54 @@ function priorityClass(p: TestCase["priority"]) {
   }
 }
 
+function riskLevelClass(riskLevel: RiskLevel) {
+  switch (riskLevel) {
+    case "High":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "Medium":
+      return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-success/40 bg-success/10 text-success";
+  }
+}
+
+function regressionPriorityClass(priority: RegressionPriority) {
+  switch (priority) {
+    case "High":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "Medium":
+      return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-success/40 bg-success/10 text-success";
+  }
+}
+
+function releaseRecommendationClass(status: ReleaseRecommendationStatus) {
+  switch (status) {
+    case "Full Regression Testing Required":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "Release with Caution":
+      return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-success/40 bg-success/10 text-success";
+  }
+}
+
+function coverageStatusClass(status: CoverageStatus | OverallCoverageStatus) {
+  switch (status) {
+    case "Excellent":
+    case "Covered":
+      return "border-success/40 bg-success/10 text-success";
+    case "Good":
+      return "border-primary/40 bg-primary/10 text-primary";
+    case "Fair":
+    case "Partial":
+      return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+  }
+}
+
 function CaseList({ cases, accent }: { cases: TestCase[]; accent: string }) {
   if (!cases?.length) {
     return <p className="text-sm text-muted-foreground">No cases generated.</p>;
@@ -375,25 +439,8 @@ function Results({ plan }: { plan: TestPlan }) {
         </Button>
       </div>
 
-      {plan.acceptanceCriteria?.length > 0 && (
-        <div className="mt-5 rounded-lg border border-primary/20 bg-primary/5 p-4">
-          <div className="mb-2 flex items-center gap-2">
-            <ClipboardCheck className="size-4 text-primary" />
-            <h3 className="text-sm font-semibold">Acceptance Criteria</h3>
-          </div>
-          <ul className="space-y-1.5 text-sm">
-            {plan.acceptanceCriteria.map((c, i) => (
-              <li key={i} className="flex gap-2">
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
-                <span>{c}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       <Tabs defaultValue="positive" className="mt-6">
-        <TabsList className="bg-surface/60">
+        <TabsList className="h-auto flex-wrap justify-start gap-1 bg-surface/60">
           <TabsTrigger value="positive">
             <CheckCircle2 className="size-3.5 text-success" /> Positive (
             {plan.positive?.length ?? 0})
@@ -408,8 +455,17 @@ function Results({ plan }: { plan: TestPlan }) {
           <TabsTrigger value="data">
             <Database className="size-3.5 text-accent" /> Test Data
           </TabsTrigger>
+          <TabsTrigger value="criteria">
+            <ClipboardCheck className="size-3.5 text-primary" /> Acceptance Criteria
+          </TabsTrigger>
           <TabsTrigger value="code">
             <Code2 className="size-3.5 text-primary-glow" /> Playwright
+          </TabsTrigger>
+          <TabsTrigger value="regression">
+            <Layers className="size-3.5 text-primary" /> Regression Impact Analysis
+          </TabsTrigger>
+          <TabsTrigger value="coverage">
+            <Gauge className="size-3.5 text-success" /> Test Coverage Score
           </TabsTrigger>
         </TabsList>
 
@@ -455,6 +511,27 @@ function Results({ plan }: { plan: TestPlan }) {
           )}
         </TabsContent>
 
+        <TabsContent value="criteria" className="mt-4">
+          {plan.acceptanceCriteria?.length > 0 ? (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <ClipboardCheck className="size-4 text-primary" />
+                <h3 className="text-sm font-semibold">Acceptance Criteria</h3>
+              </div>
+              <ul className="space-y-1.5 text-sm">
+                {plan.acceptanceCriteria.map((c, i) => (
+                  <li key={i} className="flex gap-2">
+                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                    <span>{c}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No acceptance criteria generated.</p>
+          )}
+        </TabsContent>
+
         <TabsContent value="code" className="mt-4">
           <div className="overflow-hidden rounded-lg border border-border/40 bg-[oklch(0.14_0.02_260)]">
             <div className="flex items-center justify-between border-b border-border/40 px-4 py-2">
@@ -468,7 +545,384 @@ function Results({ plan }: { plan: TestPlan }) {
             </pre>
           </div>
         </TabsContent>
+
+        <TabsContent value="regression" className="mt-4">
+          <RegressionImpactAnalysisTab analysis={plan.regressionImpact} />
+        </TabsContent>
+
+        <TabsContent value="coverage" className="mt-4">
+          <TestCoverageScoreTab analysis={plan.coverageAnalysis} />
+        </TabsContent>
       </Tabs>
     </Card>
+  );
+}
+
+function TestCoverageScoreTab({ analysis }: { analysis: TestCoverageScoreAnalysis }) {
+  return (
+    <div className="space-y-5">
+      <CoverageSummaryCard analysis={analysis} />
+      <div className="grid gap-5 lg:grid-cols-2">
+        <CoverageAreasCard
+          title="Covered Areas"
+          icon="check"
+          areas={analysis.coveredAreas}
+          emptyText="No fully covered areas detected yet."
+        />
+        <CoverageAreasCard
+          title="Missing Test Areas"
+          icon="warning"
+          areas={analysis.missingAreas}
+          emptyText="No missing areas detected."
+        />
+      </div>
+      <CoverageBreakdownTable analysis={analysis} />
+      <CoverageRecommendationsCard recommendations={analysis.recommendations} />
+    </div>
+  );
+}
+
+function CoverageSummaryCard({ analysis }: { analysis: TestCoverageScoreAnalysis }) {
+  const summaryItems = [
+    { label: "Total Test Cases", value: String(analysis.totalGeneratedTestCases) },
+    { label: "Covered Areas", value: String(analysis.coveredAreas.length) },
+    { label: "Missing Areas", value: String(analysis.missingAreas.length) },
+    { label: "Coverage Score", value: `${analysis.coverageScore}%` },
+  ];
+
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Gauge className="size-4 text-success" />
+            <h3 className="text-sm font-semibold">Coverage Summary</h3>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Overall requirement coverage based on generated test scenarios
+          </p>
+        </div>
+        <Badge
+          variant="outline"
+          className={cn("text-sm", coverageStatusClass(analysis.coverageStatus))}
+        >
+          {analysis.coverageStatus}
+        </Badge>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {summaryItems.map((item) => (
+          <div key={item.label} className="rounded-lg border border-border/40 bg-card/40 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {item.label}
+            </p>
+            <p className="mt-2 font-display text-2xl font-semibold">{item.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5">
+        <div className="mb-2 flex items-center justify-between text-sm">
+          <span className="font-medium">Coverage Score</span>
+          <span className="font-mono text-xs text-muted-foreground">{analysis.coverageScore}%</span>
+        </div>
+        <Progress value={analysis.coverageScore} className="h-2.5" />
+      </div>
+    </div>
+  );
+}
+
+function CoverageAreasCard({
+  title,
+  icon,
+  areas,
+  emptyText,
+}: {
+  title: string;
+  icon: "check" | "warning";
+  areas: string[];
+  emptyText: string;
+}) {
+  const Icon = icon === "check" ? CheckCircle2 : AlertTriangle;
+  const iconClass = icon === "check" ? "text-success" : "text-warning";
+
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Icon className={cn("size-4", iconClass)} />
+        <h3 className="text-sm font-semibold">{title}</h3>
+      </div>
+      {areas.length ? (
+        <ul className="space-y-2">
+          {areas.map((area) => (
+            <li key={area} className="flex items-start gap-2 text-sm">
+              <Icon className={cn("mt-0.5 size-4 shrink-0", iconClass)} />
+              <span>{area}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function CoverageBreakdownTable({ analysis }: { analysis: TestCoverageScoreAnalysis }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/40">
+      <div className="flex items-center gap-2 border-b border-border/40 bg-surface/60 px-4 py-3">
+        <CircleHelp className="size-4 text-primary" />
+        <h3 className="text-sm font-semibold">Coverage Breakdown</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className="bg-surface/60 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">Category</th>
+              <th className="px-3 py-2 text-left">Coverage Status</th>
+              <th className="px-3 py-2 text-left">Coverage Percentage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {analysis.breakdown.map((item) => (
+              <tr key={item.category} className="border-t border-border/40 align-top">
+                <td className="px-3 py-3 font-medium">{item.category}</td>
+                <td className="px-3 py-3">
+                  <Badge
+                    variant="outline"
+                    className={cn("text-xs", coverageStatusClass(item.status))}
+                  >
+                    {item.status}
+                  </Badge>
+                </td>
+                <td className="px-3 py-3">
+                  <div className="flex min-w-[180px] items-center gap-3">
+                    <Progress value={item.percentage} className="h-2" />
+                    <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">
+                      {item.percentage}%
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CoverageRecommendationsCard({ recommendations }: { recommendations: string[] }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <ListChecks className="size-4 text-primary" />
+        <h3 className="text-sm font-semibold">Coverage Recommendations</h3>
+      </div>
+      <ul className="space-y-2">
+        {recommendations.map((recommendation) => (
+          <li key={recommendation} className="flex items-start gap-2 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+            <span>{recommendation}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function RegressionImpactAnalysisTab({ analysis }: { analysis: RegressionImpactAnalysis }) {
+  return (
+    <div className="space-y-5">
+      <ImpactSummaryCards analysis={analysis} />
+      <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+        <ImpactedModulesList impactedModules={analysis.impactedModules} />
+        <RiskAssessmentCard analysis={analysis} />
+      </div>
+      <RegressionAreasTable regressionAreas={analysis.regressionAreas} />
+      <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+        <QAFocusChecklist qaFocusAreas={analysis.qaFocusAreas} />
+        <ReleaseRecommendationCard analysis={analysis} />
+      </div>
+    </div>
+  );
+}
+
+function ImpactSummaryCards({ analysis }: { analysis: RegressionImpactAnalysis }) {
+  const summaryCards = [
+    {
+      label: "Risk Level",
+      value: analysis.riskLevel,
+      detail: "Overall change impact",
+      badgeClass: riskLevelClass(analysis.riskLevel),
+    },
+    {
+      label: "Risk Score",
+      value: `${analysis.riskScore}/100`,
+      detail: "Keyword-based estimate",
+      badgeClass: "border-primary/40 bg-primary/10 text-primary",
+    },
+    {
+      label: "Impacted Modules",
+      value: String(analysis.impactedModules.length),
+      detail: "Modules and flows",
+      badgeClass: "border-accent/40 bg-accent/10 text-accent",
+    },
+    {
+      label: "Regression Areas",
+      value: String(analysis.regressionAreas.length),
+      detail: "Recommended coverage",
+      badgeClass: "border-warning/40 bg-warning/10 text-warning",
+    },
+  ];
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {summaryCards.map((card) => (
+        <div key={card.label} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {card.label}
+          </p>
+          <div className="mt-3">
+            <Badge variant="outline" className={cn("text-sm", card.badgeClass)}>
+              {card.value}
+            </Badge>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">{card.detail}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ImpactedModulesList({ impactedModules }: { impactedModules: string[] }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Layers className="size-4 text-primary" />
+        <h3 className="text-sm font-semibold">Impacted Modules</h3>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {impactedModules.map((module) => (
+          <Badge
+            key={module}
+            variant="outline"
+            className="border-primary/30 bg-primary/10 text-primary"
+          >
+            {module}
+          </Badge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RegressionAreasTable({
+  regressionAreas,
+}: {
+  regressionAreas: RegressionImpactAnalysis["regressionAreas"];
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/40">
+      <div className="flex items-center gap-2 border-b border-border/40 bg-surface/60 px-4 py-3">
+        <ClipboardCheck className="size-4 text-primary" />
+        <h3 className="text-sm font-semibold">Regression Test Areas</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead className="bg-surface/60 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">Area</th>
+              <th className="px-3 py-2 text-left">Priority</th>
+              <th className="px-3 py-2 text-left">Recommended Test Coverage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {regressionAreas.map((item) => (
+              <tr key={item.area} className="border-t border-border/40 align-top">
+                <td className="px-3 py-3 font-medium">{item.area}</td>
+                <td className="px-3 py-3">
+                  <Badge
+                    variant="outline"
+                    className={cn("text-xs", regressionPriorityClass(item.priority))}
+                  >
+                    {item.priority}
+                  </Badge>
+                </td>
+                <td className="px-3 py-3 text-muted-foreground">{item.coverage}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RiskAssessmentCard({ analysis }: { analysis: RegressionImpactAnalysis }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-4 text-warning" />
+            <h3 className="text-sm font-semibold">Risk Assessment</h3>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">Regression risk for this change</p>
+        </div>
+        <Badge variant="outline" className={cn("text-xs", riskLevelClass(analysis.riskLevel))}>
+          {analysis.riskLevel}
+        </Badge>
+      </div>
+      <div className="mt-5">
+        <div className="mb-2 flex items-center justify-between text-sm">
+          <span className="font-medium">Risk Score</span>
+          <span className="font-mono text-xs text-muted-foreground">{analysis.riskScore}/100</span>
+        </div>
+        <Progress value={analysis.riskScore} className="h-2.5" />
+      </div>
+      <div className="mt-4 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm">
+        <span className="font-semibold text-warning">Reason: </span>
+        <span className="text-foreground/90">{analysis.riskReason}</span>
+      </div>
+    </div>
+  );
+}
+
+function QAFocusChecklist({ qaFocusAreas }: { qaFocusAreas: string[] }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <ListChecks className="size-4 text-success" />
+        <h3 className="text-sm font-semibold">Recommended QA Focus Areas</h3>
+      </div>
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {qaFocusAreas.map((area) => (
+          <li key={area} className="flex items-start gap-2 text-sm">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+            <span>{area}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ReleaseRecommendationCard({ analysis }: { analysis: RegressionImpactAnalysis }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Rocket className="size-4 text-primary" />
+        <h3 className="text-sm font-semibold">Release Recommendation</h3>
+      </div>
+      <Badge
+        variant="outline"
+        className={cn("text-sm", releaseRecommendationClass(analysis.releaseRecommendation.status))}
+      >
+        {analysis.releaseRecommendation.status}
+      </Badge>
+      <p className="mt-4 text-sm text-muted-foreground">{analysis.releaseRecommendation.reason}</p>
+    </div>
   );
 }
