@@ -1,7 +1,4 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
 import {
   Sparkles,
   Wand2,
@@ -35,21 +32,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-import { generateTestCases, type TestCase, type TestPlan } from "@/lib/api/testcases.functions";
-
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "AI QA Copilot – AI Test Case Generator" },
-      {
-        name: "description",
-        content:
-          "Generate complete QA test plans from user stories: positive, negative, edge cases, test data, and Playwright automation skeletons.",
-      },
-    ],
-  }),
-  component: Index,
-});
+import { generateTestCases, type TestCase, type TestPlan } from "@/lib/api/testcases";
 
 const EXAMPLE = `As a registered user, I want to reset my password via email so that I can regain access to my account if I forget my credentials.
 
@@ -59,26 +42,29 @@ Acceptance Criteria:
 - Password must be at least 8 chars with one number and one symbol
 - User receives confirmation email after successful reset`;
 
-function Index() {
+export default function App() {
   const [requirement, setRequirement] = useState("");
   const [testType, setTestType] = useState<"functional" | "api" | "ui" | "integration">(
     "functional",
   );
-  const generate = useServerFn(generateTestCases);
+  const [plan, setPlan] = useState<TestPlan | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  const mutation = useMutation({
-    mutationFn: async (input: { requirement: string; testType: typeof testType }) =>
-      (await generate({ data: input })) as TestPlan,
-    onError: (e: Error) => toast.error(e.message ?? "Generation failed"),
-    onSuccess: () => toast.success("Test plan generated"),
-  });
-
-  const onGenerate = () => {
+  const onGenerate = async () => {
     if (requirement.trim().length < 10) {
       toast.error("Please describe the requirement (at least 10 characters).");
       return;
     }
-    mutation.mutate({ requirement, testType });
+    try {
+      setIsGenerating(true);
+      const generatedPlan = await generateTestCases({ requirement, testType });
+      setPlan(generatedPlan);
+      toast.success("Test plan generated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Generation failed");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -137,11 +123,11 @@ function Index() {
 
               <Button
                 onClick={onGenerate}
-                disabled={mutation.isPending}
+                disabled={isGenerating}
                 size="lg"
                 className="bg-gradient-primary text-primary-foreground shadow-glow hover:opacity-95"
               >
-                {mutation.isPending ? (
+                {isGenerating ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
                     Generating...
@@ -160,9 +146,9 @@ function Index() {
         </section>
 
         <section className="mt-10">
-          {mutation.isPending && <ResultSkeleton />}
-          {mutation.data && <Results plan={mutation.data} />}
-          {!mutation.isPending && !mutation.data && <EmptyState />}
+          {isGenerating && <ResultSkeleton />}
+          {plan && <Results plan={plan} />}
+          {!isGenerating && !plan && <EmptyState />}
         </section>
       </main>
 
