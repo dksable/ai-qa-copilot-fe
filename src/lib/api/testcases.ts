@@ -32,6 +32,8 @@ export interface TestPlan {
   playwright: string;
   regressionImpact: RegressionImpactAnalysis;
   coverageAnalysis: TestCoverageScoreAnalysis;
+  savedRequirementId?: string;
+  savedHistoryId?: string;
 }
 
 export type TestFocus = "functional" | "api" | "ui" | "integration";
@@ -39,9 +41,13 @@ export type TestFocus = "functional" | "api" | "ui" | "integration";
 export interface GenerateTestCasesInput {
   requirement: string;
   testType: TestFocus;
+  projectId?: string;
+  moduleId?: string;
+  requirementId?: string;
 }
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const BACKEND_TIMEOUT_MS = 60_000;
 
 async function generateTestCasesFromBackend(
   input: GenerateTestCasesInput,
@@ -49,13 +55,27 @@ async function generateTestCasesFromBackend(
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_URL;
   if (!apiBaseUrl) return null;
 
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/generate-testcases`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/generate-testcases`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Backend request timed out. Check the Render service status and try again.");
+    }
+    throw new Error("Backend is not reachable. Check the API URL and CORS settings.");
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null);
@@ -68,6 +88,9 @@ async function generateTestCasesFromBackend(
 export async function generateTestCases({
   requirement,
   testType,
+  projectId,
+  moduleId,
+  requirementId,
 }: GenerateTestCasesInput): Promise<TestPlan> {
   const trimmedRequirement = requirement.trim();
   if (trimmedRequirement.length < 10) {
@@ -77,6 +100,9 @@ export async function generateTestCases({
   const backendPlan = await generateTestCasesFromBackend({
     requirement: trimmedRequirement,
     testType,
+    projectId,
+    moduleId,
+    requirementId,
   });
   if (backendPlan) return backendPlan;
 

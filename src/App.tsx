@@ -19,16 +19,47 @@ import {
   ListChecks,
   Gauge,
   CircleHelp,
+  FolderKanban,
+  LayoutDashboard,
+  Plus,
+  Archive,
+  Trash2,
+  Pencil,
+  Eye,
+  CalendarDays,
+  Boxes,
+  FileText,
+  History,
+  Download,
+  Search,
+  GitCompare,
+  Bot,
+  Send,
+  MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -40,6 +71,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { generateTestCases, type TestCase, type TestPlan } from "@/lib/api/testcases";
+import {
+  projectApi,
+  type AIChat,
+  type AIChatSummary,
+  type CreateProjectInput,
+  type DashboardStats,
+  type EntityStatus,
+  type ExportFormat,
+  type ExportHistoryRecord,
+  type HistoryFilters,
+  type HistoryStatus,
+  type ModulePriority,
+  type ProjectDetail,
+  type ProjectDomain,
+  type ProjectModule,
+  type ProjectSummary,
+  type Requirement,
+  type TestCaseHistoryCompare,
+  type TestCaseHistoryRecord,
+  type TestCaseGenerationHistory,
+} from "@/lib/api/projects";
 import type {
   RegressionImpactAnalysis,
   RegressionPriority,
@@ -53,6 +105,7 @@ import type {
 } from "@/lib/api/coverageScore";
 
 type Theme = "light" | "dark";
+type ActiveView = "generator" | "projects" | "history" | "chat";
 
 const EXAMPLE = `As a registered user, I want to reset my password via email so that I can regain access to my account if I forget my credentials.
 
@@ -74,6 +127,30 @@ export default function App() {
   );
   const [plan, setPlan] = useState<TestPlan | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [activeView, setActiveView] = useState<ActiveView>("generator");
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
+  const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedModuleId, setSelectedModuleId] = useState("");
+  const [selectedRequirementId, setSelectedRequirementId] = useState("");
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<TestCaseGenerationHistory[]>([]);
+  const [allHistory, setAllHistory] = useState<TestCaseHistoryRecord[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState("");
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({});
+  const [compareFromId, setCompareFromId] = useState("");
+  const [compareToId, setCompareToId] = useState("");
+  const [comparison, setComparison] = useState<TestCaseHistoryCompare | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [exportHistory, setExportHistory] = useState<ExportHistoryRecord[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
+  const [chatHistory, setChatHistory] = useState<AIChatSummary[]>([]);
+  const [activeChat, setActiveChat] = useState<AIChat | null>(null);
+  const [chatMessage, setChatMessage] = useState("");
+  const [selectedChatHistoryVersionId, setSelectedChatHistoryVersionId] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -85,15 +162,120 @@ export default function App() {
     setTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"));
   };
 
+  const refreshProjects = async (projectId = selectedProjectId) => {
+    try {
+      setIsLoadingProjects(true);
+      const [dashboardStats, projectList] = await Promise.all([
+        projectApi.getDashboard(),
+        projectApi.listProjects(),
+      ]);
+      setDashboard(dashboardStats);
+      setProjects(projectList);
+      if (projectId) {
+        const detail = await projectApi.getProject(projectId);
+        setProjectDetail(detail);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load projects");
+    } finally {
+      setIsLoadingProjects(false);
+    }
+  };
+
+  const refreshHistory = async (filters = historyFilters) => {
+    try {
+      setIsLoadingHistory(true);
+      const records = await projectApi.listHistory(filters);
+      setAllHistory(records);
+      if (!selectedHistoryId && records[0]) setSelectedHistoryId(records[0].id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load history");
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const refreshExportHistory = async () => {
+    try {
+      setExportHistory(await projectApi.listExportHistory());
+    } catch {
+      setExportHistory([]);
+    }
+  };
+
+  const refreshChatHistory = async () => {
+    try {
+      setChatHistory(await projectApi.listAIChats());
+    } catch {
+      setChatHistory([]);
+    }
+  };
+
+  const runExport = async (label: string, action: () => Promise<void>) => {
+    try {
+      setIsExporting(true);
+      await action();
+      await refreshExportHistory();
+      toast.success(`${label} export downloaded`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshProjects("");
+    void refreshHistory({});
+    void refreshExportHistory();
+    void refreshChatHistory();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectDetail(null);
+      setSelectedModuleId("");
+      setSelectedRequirementId("");
+      return;
+    }
+    void refreshProjects(selectedProjectId);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedRequirementId) {
+      setHistoryItems([]);
+      return;
+    }
+    projectApi
+      .getHistory(selectedRequirementId)
+      .then(setHistoryItems)
+      .catch(() => setHistoryItems([]));
+  }, [selectedRequirementId]);
+
   const onGenerate = async () => {
     if (requirement.trim().length < 10) {
       toast.error("Please describe the requirement (at least 10 characters).");
       return;
     }
+    if (!selectedProjectId || !selectedModuleId) {
+      toast.error("Please select a project and module before generating test cases.");
+      return;
+    }
     try {
       setIsGenerating(true);
-      const generatedPlan = await generateTestCases({ requirement, testType });
+      const generatedPlan = await generateTestCases({
+        requirement,
+        testType,
+        projectId: selectedProjectId,
+        moduleId: selectedModuleId,
+        requirementId: selectedRequirementId || undefined,
+      });
       setPlan(generatedPlan);
+      if (generatedPlan.savedRequirementId) {
+        setSelectedRequirementId(generatedPlan.savedRequirementId);
+      }
+      await refreshProjects(selectedProjectId);
+      await refreshHistory();
       toast.success("Test plan generated");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Generation failed");
@@ -108,83 +290,250 @@ export default function App() {
       <div className="pointer-events-none absolute inset-0 bg-gradient-hero" />
       <div className="pointer-events-none absolute -top-32 left-1/2 h-[480px] w-[900px] -translate-x-1/2 rounded-full bg-gradient-mesh blur-3xl opacity-60" />
 
-      <Nav theme={theme} onToggleTheme={toggleTheme} />
+      <Nav
+        theme={theme}
+        activeView={activeView}
+        onChangeView={setActiveView}
+        onToggleTheme={toggleTheme}
+      />
 
       <main className="relative mx-auto max-w-6xl px-6 pb-24 pt-10 lg:pt-16">
-        <Hero />
+        {activeView === "generator" ? (
+          <>
+            <Hero />
 
-        <section className="mt-12 grid gap-6 lg:grid-cols-[1.05fr_1fr]">
-          <Card className="border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Wand2 className="size-4 text-primary" />
-                <h2 className="text-base font-semibold">Input</h2>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setRequirement(EXAMPLE)}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                Load example
-              </Button>
-            </div>
+            <section className="mt-12 grid gap-6 lg:grid-cols-[1.05fr_1fr]">
+              <GeneratorCard
+                requirement={requirement}
+                testType={testType}
+                projects={projects}
+                projectDetail={projectDetail}
+                selectedProjectId={selectedProjectId}
+                selectedModuleId={selectedModuleId}
+                selectedRequirementId={selectedRequirementId}
+                isGenerating={isGenerating}
+                onRequirementChange={setRequirement}
+                onTestTypeChange={setTestType}
+                onProjectChange={(projectId) => {
+                  setSelectedProjectId(projectId);
+                  setSelectedModuleId("");
+                  setSelectedRequirementId("");
+                }}
+                onModuleChange={(moduleId) => {
+                  setSelectedModuleId(moduleId);
+                  setSelectedRequirementId("");
+                }}
+                onRequirementSelect={setSelectedRequirementId}
+                onLoadExample={() => setRequirement(EXAMPLE)}
+                onGenerate={onGenerate}
+              />
 
-            <label className="mb-2 block text-xs font-medium text-muted-foreground">
-              User story, requirement, or acceptance criteria
-            </label>
-            <Textarea
-              value={requirement}
-              onChange={(e) => setRequirement(e.target.value)}
-              placeholder="As a user, I want to ... so that ..."
-              className="min-h-[260px] resize-y border-border/60 bg-input/40 font-mono text-sm leading-relaxed focus-visible:ring-primary"
-            />
+              <FeatureGrid />
+            </section>
 
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Test focus</span>
-                <Select value={testType} onValueChange={(v) => setTestType(v as typeof testType)}>
-                  <SelectTrigger className="h-9 w-[160px] border-border/60 bg-input/40 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="functional">Functional</SelectItem>
-                    <SelectItem value="ui">UI / UX</SelectItem>
-                    <SelectItem value="api">API</SelectItem>
-                    <SelectItem value="integration">Integration</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button
-                onClick={onGenerate}
-                disabled={isGenerating}
-                size="lg"
-                className="bg-gradient-primary text-primary-foreground shadow-glow hover:opacity-95"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="size-4" />
-                    Generate Test Cases
-                  </>
-                )}
-              </Button>
-            </div>
-          </Card>
-
-          <FeatureGrid />
-        </section>
-
-        <section className="mt-10">
-          {isGenerating && <ResultSkeleton />}
-          {plan && <Results plan={plan} />}
-          {!isGenerating && !plan && <EmptyState />}
-        </section>
+            <section className="mt-10">
+              {isGenerating && <ResultSkeleton />}
+              {plan && (
+                <Results
+                  plan={plan}
+                  onExport={
+                    plan.savedHistoryId
+                      ? (format) =>
+                          runExport(format === "excel" ? "Excel" : "PDF", () =>
+                            projectApi.exportVersion(plan.savedHistoryId!, format),
+                          )
+                      : undefined
+                  }
+                  isExporting={isExporting}
+                />
+              )}
+              {!isGenerating && !plan && <EmptyState />}
+            </section>
+          </>
+        ) : activeView === "projects" ? (
+          <ProjectsPage
+            dashboard={dashboard}
+            projects={projects}
+            projectDetail={projectDetail}
+            selectedProjectId={selectedProjectId}
+            selectedModuleId={selectedModuleId}
+            selectedRequirementId={selectedRequirementId}
+            historyItems={historyItems}
+            isLoading={isLoadingProjects}
+            isProjectDialogOpen={isProjectDialogOpen}
+            onProjectDialogOpenChange={setIsProjectDialogOpen}
+            onSelectProject={setSelectedProjectId}
+            onSelectModule={setSelectedModuleId}
+            onSelectRequirement={setSelectedRequirementId}
+            onRefresh={() => refreshProjects(selectedProjectId)}
+            isExporting={isExporting}
+            onExportRequirement={(requirementId, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () =>
+                projectApi.exportRequirement(requirementId, format),
+              )
+            }
+            onExportProject={(projectId, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () =>
+                projectApi.exportProject(projectId, format),
+              )
+            }
+          />
+        ) : activeView === "history" ? (
+          <TestCaseHistoryPage
+            projects={projects}
+            projectDetail={projectDetail}
+            history={allHistory}
+            selectedHistoryId={selectedHistoryId}
+            filters={historyFilters}
+            compareFromId={compareFromId}
+            compareToId={compareToId}
+            comparison={comparison}
+            exportHistory={exportHistory}
+            isLoading={isLoadingHistory}
+            isExporting={isExporting}
+            onSelectHistory={setSelectedHistoryId}
+            onSelectProject={(projectId) => {
+              setSelectedProjectId(projectId);
+              setSelectedModuleId("");
+              setSelectedRequirementId("");
+            }}
+            onFiltersChange={(filters) => {
+              setHistoryFilters(filters);
+              void refreshHistory(filters);
+            }}
+            onStatusChange={async (historyId, status) => {
+              await projectApi.updateHistoryStatus(historyId, status);
+              toast.success("History status updated");
+              await refreshHistory(historyFilters);
+            }}
+            onDelete={async (historyId) => {
+              if (!window.confirm("Delete this history version?")) return;
+              await projectApi.deleteHistory(historyId);
+              toast.success("History record deleted");
+              setSelectedHistoryId("");
+              await refreshHistory(historyFilters);
+            }}
+            onCompareFromChange={setCompareFromId}
+            onCompareToChange={setCompareToId}
+            onCompare={async () => {
+              if (!compareFromId || !compareToId) {
+                toast.error("Select two versions to compare.");
+                return;
+              }
+              setComparison(await projectApi.compareHistory(compareFromId, compareToId));
+            }}
+            onExportVersions={(historyIds, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () =>
+                projectApi.exportVersions(historyIds, format),
+              )
+            }
+            onExportRequirement={(requirementId, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () =>
+                projectApi.exportRequirement(requirementId, format),
+              )
+            }
+            onExportProject={(projectId, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () =>
+                projectApi.exportProject(projectId, format),
+              )
+            }
+            onExportFiltered={(filters, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () =>
+                projectApi.exportFiltered(filters, format),
+              )
+            }
+          />
+        ) : (
+          <AIChatPage
+            projects={projects}
+            projectDetail={projectDetail}
+            selectedProjectId={selectedProjectId}
+            selectedModuleId={selectedModuleId}
+            selectedRequirementId={selectedRequirementId}
+            activeChat={activeChat}
+            chatHistory={chatHistory}
+            message={chatMessage}
+            isLoading={isChatLoading}
+            onProjectChange={(projectId) => {
+              setSelectedProjectId(projectId);
+              setSelectedModuleId("");
+              setSelectedRequirementId("");
+              setSelectedChatHistoryVersionId("");
+              setActiveChat(null);
+            }}
+            onModuleChange={(moduleId) => {
+              setSelectedModuleId(moduleId);
+              setSelectedRequirementId("");
+              setSelectedChatHistoryVersionId("");
+              setActiveChat(null);
+            }}
+            onRequirementChange={(requirementId) => {
+              setSelectedRequirementId(requirementId);
+              setSelectedChatHistoryVersionId("");
+              setActiveChat(null);
+            }}
+            onMessageChange={setChatMessage}
+            onSend={async (prompt) => {
+              const userMessage = prompt ?? chatMessage;
+              if (!selectedProjectId || !selectedModuleId || !selectedRequirementId) {
+                toast.error("Select project, module, and requirement before chatting.");
+                return;
+              }
+              if (!userMessage.trim()) return;
+              try {
+                setIsChatLoading(true);
+                const chat = await projectApi.sendAIChatMessage({
+                  chatId: activeChat?.id,
+                  projectId: selectedProjectId,
+                  moduleId: selectedModuleId,
+                  requirementId: selectedRequirementId,
+                  historyVersionId: activeChat?.historyVersionId || selectedChatHistoryVersionId || undefined,
+                  userMessage,
+                });
+                setActiveChat(chat);
+                setSelectedChatHistoryVersionId(chat.historyVersionId ?? selectedChatHistoryVersionId);
+                setChatMessage("");
+                await refreshChatHistory();
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "AI chat failed");
+              } finally {
+                setIsChatLoading(false);
+              }
+            }}
+            onOpenChat={async (chatId) => {
+              try {
+                const chat = await projectApi.getAIChat(chatId);
+                setActiveChat(chat);
+                setSelectedChatHistoryVersionId(chat.historyVersionId ?? "");
+                setSelectedProjectId(chat.projectId);
+                setSelectedModuleId(chat.moduleId);
+                setSelectedRequirementId(chat.requirementId);
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Failed to open chat");
+              }
+            }}
+            onDeleteChat={async (chatId) => {
+              if (!window.confirm("Delete this AI chat?")) return;
+              await projectApi.deleteAIChat(chatId);
+              if (activeChat?.id === chatId) setActiveChat(null);
+              await refreshChatHistory();
+              toast.success("Chat deleted");
+            }}
+            onNewChat={() => {
+              setActiveChat(null);
+              setChatMessage("");
+              setSelectedChatHistoryVersionId("");
+            }}
+            selectedHistoryVersionId={selectedChatHistoryVersionId}
+            onHistoryVersionChange={setSelectedChatHistoryVersionId}
+            onSaveAsVersion={async () => {
+              if (!activeChat) return;
+              const history = await projectApi.saveChatAsVersion(activeChat.id, activeChat.historyVersionId);
+              toast.success(`Saved as Version ${history.version}`);
+              await refreshHistory();
+            }}
+          />
+        )}
       </main>
 
       <Toaster richColors theme={theme} position="top-right" />
@@ -192,8 +541,24 @@ export default function App() {
   );
 }
 
-function Nav({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
+function Nav({
+  theme,
+  activeView,
+  onChangeView,
+  onToggleTheme,
+}: {
+  theme: Theme;
+  activeView: ActiveView;
+  onChangeView: (view: ActiveView) => void;
+  onToggleTheme: () => void;
+}) {
   const isDark = theme === "dark";
+  const navItems: Array<{ label: string; value: ActiveView; icon: typeof Wand2 }> = [
+    { label: "Generator", value: "generator", icon: Wand2 },
+    { label: "Projects", value: "projects", icon: FolderKanban },
+    { label: "Test Case History", value: "history", icon: History },
+    { label: "AI Chat", value: "chat", icon: Bot },
+  ];
 
   return (
     <header className="relative z-10 border-b border-border/40 bg-background/40 backdrop-blur-md">
@@ -207,13 +572,19 @@ function Nav({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void
           </span>
         </div>
         <div className="flex items-center gap-2 md:gap-4">
-          <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-            <a href="#features" className="hover:text-foreground">
-              Features
-            </a>
-            <a href="#generator" className="hover:text-foreground">
-              Generator
-            </a>
+          <nav className="hidden items-center gap-2 text-sm text-muted-foreground md:flex">
+            {navItems.map(({ label, value, icon: Icon }) => (
+              <Button
+                key={value}
+                type="button"
+                variant={activeView === value ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => onChangeView(value)}
+              >
+                <Icon className="size-4" />
+                {label}
+              </Button>
+            ))}
             <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
               Powered by AI
             </Badge>
@@ -232,6 +603,1850 @@ function Nav({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void
         </div>
       </div>
     </header>
+  );
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(
+    new Date(value),
+  );
+}
+
+function statusClass(status: EntityStatus) {
+  return status === "Active"
+    ? "border-success/40 bg-success/10 text-success"
+    : "border-muted-foreground/30 bg-muted/30 text-muted-foreground";
+}
+
+function modulePriorityClass(priority: ModulePriority) {
+  switch (priority) {
+    case "Critical":
+      return "border-destructive/60 bg-destructive/15 text-destructive";
+    case "High":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "Medium":
+      return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-success/40 bg-success/10 text-success";
+  }
+}
+
+function GeneratorCard({
+  requirement,
+  testType,
+  projects,
+  projectDetail,
+  selectedProjectId,
+  selectedModuleId,
+  selectedRequirementId,
+  isGenerating,
+  onRequirementChange,
+  onTestTypeChange,
+  onProjectChange,
+  onModuleChange,
+  onRequirementSelect,
+  onLoadExample,
+  onGenerate,
+}: {
+  requirement: string;
+  testType: "functional" | "api" | "ui" | "integration";
+  projects: ProjectSummary[];
+  projectDetail: ProjectDetail | null;
+  selectedProjectId: string;
+  selectedModuleId: string;
+  selectedRequirementId: string;
+  isGenerating: boolean;
+  onRequirementChange: (value: string) => void;
+  onTestTypeChange: (value: "functional" | "api" | "ui" | "integration") => void;
+  onProjectChange: (value: string) => void;
+  onModuleChange: (value: string) => void;
+  onRequirementSelect: (value: string) => void;
+  onLoadExample: () => void;
+  onGenerate: () => void;
+}) {
+  const modules = projectDetail?.modules.filter((moduleItem) => moduleItem.status === "Active") ?? [];
+  const requirements =
+    projectDetail?.requirements.filter((item) => item.moduleId === selectedModuleId) ?? [];
+
+  return (
+    <Card className="border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Wand2 className="size-4 text-primary" />
+          <h2 className="text-base font-semibold">Input</h2>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onLoadExample}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Load example
+        </Button>
+      </div>
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="mb-2 block text-xs font-medium text-muted-foreground">Project</label>
+          <Select value={selectedProjectId} onValueChange={onProjectChange}>
+            <SelectTrigger className="border-border/60 bg-input/40">
+              <SelectValue placeholder="Select project" />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-medium text-muted-foreground">Module</label>
+          <Select value={selectedModuleId} onValueChange={onModuleChange} disabled={!selectedProjectId}>
+            <SelectTrigger className="border-border/60 bg-input/40">
+              <SelectValue placeholder="Select module" />
+            </SelectTrigger>
+            <SelectContent>
+              {modules.map((moduleItem) => (
+                <SelectItem key={moduleItem.id} value={moduleItem.id}>
+                  {moduleItem.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_160px]">
+        <div>
+          <label className="mb-2 block text-xs font-medium text-muted-foreground">
+            Existing requirement
+          </label>
+          <Select
+            value={selectedRequirementId || "new"}
+            onValueChange={(value) => onRequirementSelect(value === "new" ? "" : value)}
+            disabled={!selectedModuleId}
+          >
+            <SelectTrigger className="border-border/60 bg-input/40">
+              <SelectValue placeholder="New requirement" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="new">New requirement</SelectItem>
+              {requirements.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-medium text-muted-foreground">Test focus</label>
+          <Select value={testType} onValueChange={(v) => onTestTypeChange(v as typeof testType)}>
+            <SelectTrigger className="border-border/60 bg-input/40 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="functional">Functional</SelectItem>
+              <SelectItem value="ui">UI / UX</SelectItem>
+              <SelectItem value="api">API</SelectItem>
+              <SelectItem value="integration">Integration</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <label className="mb-2 block text-xs font-medium text-muted-foreground">
+        User story, requirement, or acceptance criteria
+      </label>
+      <Textarea
+        value={requirement}
+        onChange={(e) => onRequirementChange(e.target.value)}
+        placeholder="As a user, I want to ... so that ..."
+        className="min-h-[260px] resize-y border-border/60 bg-input/40 font-mono text-sm leading-relaxed focus-visible:ring-primary"
+      />
+
+      <div className="mt-4 flex justify-end">
+        <Button
+          onClick={onGenerate}
+          disabled={isGenerating}
+          size="lg"
+          className="bg-gradient-primary text-primary-foreground shadow-glow hover:opacity-95"
+        >
+          {isGenerating ? (
+            <>
+              <Loader2 className="size-4 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            <>
+              <Sparkles className="size-4" />
+              Generate & Save Test Cases
+            </>
+          )}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function ProjectsPage({
+  dashboard,
+  projects,
+  projectDetail,
+  selectedProjectId,
+  selectedModuleId,
+  selectedRequirementId,
+  historyItems,
+  isLoading,
+  isProjectDialogOpen,
+  onProjectDialogOpenChange,
+  onSelectProject,
+  onSelectModule,
+  onSelectRequirement,
+  onRefresh,
+  isExporting,
+  onExportRequirement,
+  onExportProject,
+}: {
+  dashboard: DashboardStats | null;
+  projects: ProjectSummary[];
+  projectDetail: ProjectDetail | null;
+  selectedProjectId: string;
+  selectedModuleId: string;
+  selectedRequirementId: string;
+  historyItems: TestCaseGenerationHistory[];
+  isLoading: boolean;
+  isProjectDialogOpen: boolean;
+  onProjectDialogOpenChange: (open: boolean) => void;
+  onSelectProject: (projectId: string) => void;
+  onSelectModule: (moduleId: string) => void;
+  onSelectRequirement: (requirementId: string) => void;
+  onRefresh: () => void;
+  isExporting: boolean;
+  onExportRequirement: (requirementId: string, format: ExportFormat) => void;
+  onExportProject: (projectId: string, format: ExportFormat) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            <LayoutDashboard className="mr-1 size-3" /> Project management
+          </Badge>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">
+            Projects
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Organize generated test cases by project, module, requirement, and version history.
+          </p>
+        </div>
+        <ProjectDialog
+          open={isProjectDialogOpen}
+          onOpenChange={onProjectDialogOpenChange}
+          onCreated={(project) => {
+            onSelectProject(project.id);
+            onRefresh();
+          }}
+        />
+      </div>
+
+      <DashboardCards dashboard={dashboard} />
+
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <ProjectList
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          isLoading={isLoading}
+          onSelectProject={onSelectProject}
+          onRefresh={onRefresh}
+        />
+        <ProjectDetailPanel
+          detail={projectDetail}
+          selectedModuleId={selectedModuleId}
+          selectedRequirementId={selectedRequirementId}
+          historyItems={historyItems}
+          onSelectModule={onSelectModule}
+          onSelectRequirement={onSelectRequirement}
+          onRefresh={onRefresh}
+          isExporting={isExporting}
+          onExportRequirement={onExportRequirement}
+          onExportProject={onExportProject}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DashboardCards({ dashboard }: { dashboard: DashboardStats | null }) {
+  const items = [
+    { label: "Total Projects", value: dashboard?.totalProjects ?? 0, icon: FolderKanban },
+    { label: "Active Projects", value: dashboard?.activeProjects ?? 0, icon: CheckCircle2 },
+    { label: "Modules", value: dashboard?.totalModules ?? 0, icon: Boxes },
+    { label: "Requirements", value: dashboard?.totalRequirements ?? 0, icon: FileText },
+    { label: "Test Cases", value: dashboard?.totalTestCases ?? 0, icon: ClipboardCheck },
+    { label: "Avg Coverage", value: `${dashboard?.averageTestCoverageScore ?? 0}%`, icon: Gauge },
+  ];
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      {items.map(({ label, value, icon: Icon }) => (
+        <Card key={label} className="border-border/50 bg-card/60 p-4 backdrop-blur">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {label}
+            </p>
+            <Icon className="size-4 text-primary" />
+          </div>
+          <p className="mt-3 font-display text-2xl font-semibold">{value}</p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ProjectDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (project: ProjectSummary) => void;
+}) {
+  const [form, setForm] = useState<CreateProjectInput>({
+    name: "",
+    description: "",
+    domain: "SaaS",
+    status: "Active",
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.description.trim()) {
+      toast.error("Project name and description are required.");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const project = await projectApi.createProject(form);
+      toast.success("Project created");
+      setForm({ name: "", description: "", domain: "SaaS", status: "Active" });
+      onOpenChange(false);
+      onCreated(project);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create project");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button className="bg-gradient-primary text-primary-foreground shadow-glow hover:opacity-95">
+          <Plus className="size-4" />
+          Create Project
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="border-border/60 bg-card">
+        <DialogHeader>
+          <DialogTitle>Create Project</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="mb-2 block text-xs font-medium text-muted-foreground">
+              Project Name
+            </label>
+            <Input
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              placeholder="Customer Portal QA"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-medium text-muted-foreground">
+              Description
+            </label>
+            <Textarea
+              value={form.description}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, description: event.target.value }))
+              }
+              placeholder="Regression coverage for the customer-facing portal"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-medium text-muted-foreground">
+              Domain / Category
+            </label>
+            <Select
+              value={form.domain}
+              onValueChange={(domain) =>
+                setForm((current) => ({ ...current, domain: domain as ProjectDomain }))
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["Banking", "Healthcare", "E-commerce", "SaaS", "Education", "Custom"].map(
+                  (domain) => (
+                    <SelectItem key={domain} value={domain}>
+                      {domain}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={submit} disabled={isSaving} className="w-full">
+            {isSaving && <Loader2 className="size-4 animate-spin" />}
+            Save Project
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProjectList({
+  projects,
+  selectedProjectId,
+  isLoading,
+  onSelectProject,
+  onRefresh,
+}: {
+  projects: ProjectSummary[];
+  selectedProjectId: string;
+  isLoading: boolean;
+  onSelectProject: (projectId: string) => void;
+  onRefresh: () => void;
+}) {
+  const archiveProject = async (projectId: string) => {
+    if (!window.confirm("Archive this project?")) return;
+    await projectApi.archiveProject(projectId);
+    toast.success("Project archived");
+    onRefresh();
+  };
+
+  const deleteProject = async (projectId: string) => {
+    if (!window.confirm("Delete this project and all modules, requirements, and history?")) return;
+    await projectApi.deleteProject(projectId);
+    toast.success("Project deleted");
+    onSelectProject("");
+    onRefresh();
+  };
+
+  return (
+    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FolderKanban className="size-4 text-primary" />
+          <h2 className="text-base font-semibold">All Projects</h2>
+        </div>
+        {isLoading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+      </div>
+      {projects.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
+          <FolderKanban className="mx-auto size-8 text-muted-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">No projects yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {projects.map((project) => (
+            <div
+              key={project.id}
+              className={cn(
+                "rounded-lg border bg-surface/40 p-4 transition-colors",
+                selectedProjectId === project.id
+                  ? "border-primary/50"
+                  : "border-border/40 hover:border-primary/30",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => onSelectProject(project.id)}
+                className="w-full text-left"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">{project.name}</h3>
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                      {project.description}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className={cn("text-xs", statusClass(project.status))}>
+                    {project.status}
+                  </Badge>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                  <span>{project.totalModules} modules</span>
+                  <span>{project.totalRequirements} reqs</span>
+                  <span>{project.totalTestCases} tests</span>
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <CalendarDays className="size-3.5" />
+                  Updated {formatDate(project.lastUpdatedAt)}
+                </div>
+              </button>
+              <div className="mt-3 flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => archiveProject(project.id)}>
+                  <Archive className="size-3.5" />
+                  Archive
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => deleteProject(project.id)}>
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ProjectDetailPanel({
+  detail,
+  selectedModuleId,
+  selectedRequirementId,
+  historyItems,
+  onSelectModule,
+  onSelectRequirement,
+  onRefresh,
+  isExporting,
+  onExportRequirement,
+  onExportProject,
+}: {
+  detail: ProjectDetail | null;
+  selectedModuleId: string;
+  selectedRequirementId: string;
+  historyItems: TestCaseGenerationHistory[];
+  onSelectModule: (moduleId: string) => void;
+  onSelectRequirement: (requirementId: string) => void;
+  onRefresh: () => void;
+  isExporting: boolean;
+  onExportRequirement: (requirementId: string, format: ExportFormat) => void;
+  onExportProject: (projectId: string, format: ExportFormat) => void;
+}) {
+  if (!detail) {
+    return (
+      <Card className="border-dashed border-border/50 bg-card/30 p-10 text-center backdrop-blur">
+        <Eye className="mx-auto size-8 text-muted-foreground" />
+        <p className="mt-3 text-sm text-muted-foreground">Select a project to view details.</p>
+      </Card>
+    );
+  }
+
+  const selectedModule = detail.modules.find((item) => item.id === selectedModuleId);
+  const moduleRequirements = detail.requirements.filter((item) => item.moduleId === selectedModuleId);
+  const selectedRequirement = detail.requirements.find((item) => item.id === selectedRequirementId);
+  const latestCoverage =
+    detail.histories.length > 0
+      ? Math.round(
+          detail.histories.reduce((total, item) => total + item.coverageScore, 0) /
+            detail.histories.length,
+        )
+      : 0;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold">{detail.project.name}</h2>
+              <Badge variant="outline" className={cn("text-xs", statusClass(detail.project.status))}>
+                {detail.project.status}
+              </Badge>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">{detail.project.description}</p>
+          </div>
+          <Badge variant="outline">{detail.project.domain}</Badge>
+          <ExportDropdown
+            label="Export Project"
+            disabled={isExporting}
+            onExport={(format) => onExportProject(detail.project.id, format)}
+          />
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-4">
+          <MiniStat label="Modules" value={detail.modules.length} />
+          <MiniStat label="Requirements" value={detail.requirements.length} />
+          <MiniStat label="Versions" value={detail.histories.length} />
+          <MiniStat label="Avg Coverage" value={`${latestCoverage}%`} />
+        </div>
+      </Card>
+
+      <ModuleManager
+        projectId={detail.project.id}
+        modules={detail.modules}
+        selectedModuleId={selectedModuleId}
+        onSelectModule={onSelectModule}
+        onRefresh={onRefresh}
+      />
+
+      <RequirementManager
+        projectId={detail.project.id}
+        selectedModule={selectedModule}
+        requirements={moduleRequirements}
+        selectedRequirementId={selectedRequirementId}
+        onSelectRequirement={onSelectRequirement}
+        onRefresh={onRefresh}
+        isExporting={isExporting}
+        onExportRequirement={onExportRequirement}
+      />
+
+      <HistoryPanel selectedRequirement={selectedRequirement} historyItems={historyItems} />
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 font-display text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function ModuleManager({
+  projectId,
+  modules,
+  selectedModuleId,
+  onSelectModule,
+  onRefresh,
+}: {
+  projectId: string;
+  modules: ProjectModule[];
+  selectedModuleId: string;
+  onSelectModule: (moduleId: string) => void;
+  onRefresh: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    priority: "Medium" as ModulePriority,
+    status: "Active" as EntityStatus,
+  });
+
+  const addModule = async () => {
+    if (!form.name.trim()) {
+      toast.error("Module name is required.");
+      return;
+    }
+    const moduleItem = await projectApi.createModule({ projectId, ...form });
+    toast.success("Module added");
+    setForm({ name: "", description: "", priority: "Medium", status: "Active" });
+    onSelectModule(moduleItem.id);
+    onRefresh();
+  };
+
+  const editModule = async (moduleItem: ProjectModule) => {
+    const name = window.prompt("Module name", moduleItem.name);
+    if (!name) return;
+    await projectApi.updateModule(moduleItem.id, { name });
+    toast.success("Module updated");
+    onRefresh();
+  };
+
+  const deleteModuleItem = async (moduleId: string) => {
+    if (!window.confirm("Delete this module and its requirements/history?")) return;
+    await projectApi.deleteModule(moduleId);
+    toast.success("Module deleted");
+    onSelectModule("");
+    onRefresh();
+  };
+
+  return (
+    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+      <div className="mb-4 flex items-center gap-2">
+        <Boxes className="size-4 text-primary" />
+        <h3 className="font-semibold">Modules</h3>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_150px_auto]">
+        <Input
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+          placeholder="Login"
+        />
+        <Input
+          value={form.description}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, description: event.target.value }))
+          }
+          placeholder="Module description"
+        />
+        <Select
+          value={form.priority}
+          onValueChange={(priority) =>
+            setForm((current) => ({ ...current, priority: priority as ModulePriority }))
+          }
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["Low", "Medium", "High", "Critical"].map((priority) => (
+              <SelectItem key={priority} value={priority}>
+                {priority}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button onClick={addModule}>
+          <Plus className="size-4" />
+          Add
+        </Button>
+      </div>
+      <div className="mt-4 space-y-2">
+        {modules.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+            No modules yet. Add Login, Registration, Payment, Dashboard, or any product area.
+          </p>
+        ) : (
+          modules.map((moduleItem) => (
+            <div
+              key={moduleItem.id}
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-surface/40 p-3",
+                selectedModuleId === moduleItem.id ? "border-primary/50" : "border-border/40",
+              )}
+            >
+              <button type="button" onClick={() => onSelectModule(moduleItem.id)} className="text-left">
+                <p className="font-medium">{moduleItem.name}</p>
+                <p className="text-xs text-muted-foreground">{moduleItem.description || "No description"}</p>
+              </button>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className={cn("text-xs", modulePriorityClass(moduleItem.priority))}>
+                  {moduleItem.priority}
+                </Badge>
+                <Badge variant="outline" className={cn("text-xs", statusClass(moduleItem.status))}>
+                  {moduleItem.status}
+                </Badge>
+                <Button variant="ghost" size="icon" onClick={() => editModule(moduleItem)}>
+                  <Pencil className="size-4" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => deleteModuleItem(moduleItem.id)}>
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function RequirementManager({
+  projectId,
+  selectedModule,
+  requirements,
+  selectedRequirementId,
+  onSelectRequirement,
+  onRefresh,
+  isExporting,
+  onExportRequirement,
+}: {
+  projectId: string;
+  selectedModule?: ProjectModule;
+  requirements: Requirement[];
+  selectedRequirementId: string;
+  onSelectRequirement: (requirementId: string) => void;
+  onRefresh: () => void;
+  isExporting: boolean;
+  onExportRequirement: (requirementId: string, format: ExportFormat) => void;
+}) {
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    acceptanceCriteria: "",
+    priority: "Medium" as ModulePriority,
+    status: "Active" as EntityStatus,
+  });
+
+  const addRequirement = async () => {
+    if (!selectedModule) {
+      toast.error("Select a module first.");
+      return;
+    }
+    if (!form.title.trim() || !form.description.trim()) {
+      toast.error("Requirement title and description are required.");
+      return;
+    }
+    const requirement = await projectApi.createRequirement({
+      projectId,
+      moduleId: selectedModule.id,
+      ...form,
+    });
+    toast.success("Requirement added");
+    setForm({
+      title: "",
+      description: "",
+      acceptanceCriteria: "",
+      priority: "Medium",
+      status: "Active",
+    });
+    onSelectRequirement(requirement.id);
+    onRefresh();
+  };
+
+  const editRequirement = async (requirement: Requirement) => {
+    const title = window.prompt("Requirement title", requirement.title);
+    if (!title) return;
+    await projectApi.updateRequirement(requirement.id, { title });
+    toast.success("Requirement updated");
+    onRefresh();
+  };
+
+  const deleteRequirementItem = async (requirementId: string) => {
+    if (!window.confirm("Delete this requirement and all generated versions?")) return;
+    await projectApi.deleteRequirement(requirementId);
+    toast.success("Requirement deleted");
+    onSelectRequirement("");
+    onRefresh();
+  };
+
+  return (
+    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FileText className="size-4 text-primary" />
+          <h3 className="font-semibold">Requirements</h3>
+        </div>
+        <ExportDropdown
+          label="Export Requirement"
+          disabled={isExporting || !selectedRequirementId}
+          onExport={(format) => onExportRequirement(selectedRequirementId, format)}
+        />
+      </div>
+      <div className="grid gap-3">
+        <div className="grid gap-3 sm:grid-cols-[1fr_150px_auto]">
+          <Input
+            value={form.title}
+            onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+            placeholder="Reset password via email"
+            disabled={!selectedModule}
+          />
+          <Select
+            value={form.priority}
+            onValueChange={(priority) =>
+              setForm((current) => ({ ...current, priority: priority as ModulePriority }))
+            }
+            disabled={!selectedModule}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {["Low", "Medium", "High", "Critical"].map((priority) => (
+                <SelectItem key={priority} value={priority}>
+                  {priority}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={addRequirement} disabled={!selectedModule}>
+            <Plus className="size-4" />
+            Add
+          </Button>
+        </div>
+        <Textarea
+          value={form.description}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, description: event.target.value }))
+          }
+          placeholder="Requirement description"
+          disabled={!selectedModule}
+        />
+        <Textarea
+          value={form.acceptanceCriteria}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, acceptanceCriteria: event.target.value }))
+          }
+          placeholder="Acceptance criteria"
+          disabled={!selectedModule}
+        />
+      </div>
+      <div className="mt-4 space-y-2">
+        {!selectedModule ? (
+          <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+            Select a module to manage requirements.
+          </p>
+        ) : requirements.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+            No requirements under this module yet.
+          </p>
+        ) : (
+          requirements.map((requirement) => (
+            <div
+              key={requirement.id}
+              className={cn(
+                "rounded-lg border bg-surface/40 p-3",
+                selectedRequirementId === requirement.id ? "border-primary/50" : "border-border/40",
+              )}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => onSelectRequirement(requirement.id)}
+                  className="text-left"
+                >
+                  <p className="font-medium">{requirement.title}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {requirement.description}
+                  </p>
+                </button>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className={cn("text-xs", modulePriorityClass(requirement.priority))}>
+                    {requirement.priority}
+                  </Badge>
+                  <Button variant="ghost" size="icon" onClick={() => editRequirement(requirement)}>
+                    <Pencil className="size-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => deleteRequirementItem(requirement.id)}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Created {formatDate(requirement.createdAt)} · Updated {formatDate(requirement.updatedAt)}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function HistoryPanel({
+  selectedRequirement,
+  historyItems,
+}: {
+  selectedRequirement?: Requirement;
+  historyItems: TestCaseGenerationHistory[];
+}) {
+  return (
+    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+      <div className="mb-4 flex items-center gap-2">
+        <History className="size-4 text-primary" />
+        <h3 className="font-semibold">Test Case History</h3>
+      </div>
+      {!selectedRequirement ? (
+        <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+          Select a requirement to view generated versions.
+        </p>
+      ) : historyItems.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+          No generated versions for this requirement yet.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {historyItems.map((item) => (
+            <div key={item.id} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">Version {item.version}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(item.generatedAt)} by {item.generatedBy}
+                  </p>
+                </div>
+                <Badge variant="outline" className={cn("text-xs", coverageStatusClass(item.output.coverageAnalysis.coverageStatus))}>
+                  {item.coverageScore}% coverage
+                </Badge>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                <span>Model: {item.aiModelUsed}</span>
+                <span>Positive: {item.output.positive.length}</span>
+                <span>Negative: {item.output.negative.length}</span>
+                <span>Edge: {item.output.edge.length}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function historyStatusClass(status: HistoryStatus) {
+  switch (status) {
+    case "Approved":
+      return "border-success/40 bg-success/10 text-success";
+    case "Reviewed":
+      return "border-primary/40 bg-primary/10 text-primary";
+    default:
+      return "border-warning/40 bg-warning/10 text-warning";
+  }
+}
+
+function TestCaseHistoryPage({
+  projects,
+  projectDetail,
+  history,
+  selectedHistoryId,
+  filters,
+  compareFromId,
+  compareToId,
+  comparison,
+  exportHistory,
+  isLoading,
+  isExporting,
+  onSelectHistory,
+  onSelectProject,
+  onFiltersChange,
+  onStatusChange,
+  onDelete,
+  onCompareFromChange,
+  onCompareToChange,
+  onCompare,
+  onExportVersions,
+  onExportRequirement,
+  onExportProject,
+  onExportFiltered,
+}: {
+  projects: ProjectSummary[];
+  projectDetail: ProjectDetail | null;
+  history: TestCaseHistoryRecord[];
+  selectedHistoryId: string;
+  filters: HistoryFilters;
+  compareFromId: string;
+  compareToId: string;
+  comparison: TestCaseHistoryCompare | null;
+  exportHistory: ExportHistoryRecord[];
+  isLoading: boolean;
+  isExporting: boolean;
+  onSelectHistory: (historyId: string) => void;
+  onSelectProject: (projectId: string) => void;
+  onFiltersChange: (filters: HistoryFilters) => void;
+  onStatusChange: (historyId: string, status: HistoryStatus) => void;
+  onDelete: (historyId: string) => void;
+  onCompareFromChange: (historyId: string) => void;
+  onCompareToChange: (historyId: string) => void;
+  onCompare: () => void;
+  onExportVersions: (historyIds: string[], format: ExportFormat) => void;
+  onExportRequirement: (requirementId: string, format: ExportFormat) => void;
+  onExportProject: (projectId: string, format: ExportFormat) => void;
+  onExportFiltered: (filters: HistoryFilters, format: ExportFormat) => void;
+}) {
+  const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
+  const selectedHistory = history.find((item) => item.id === selectedHistoryId) ?? history[0];
+  const selectedRequirementVersions = selectedHistory
+    ? history
+        .filter((item) => item.requirementId === selectedHistory.requirementId)
+        .sort((a, b) => a.version - b.version)
+    : [];
+  const modules = projectDetail?.modules ?? [];
+  const requirements = projectDetail?.requirements.filter((item) => !filters.moduleId || item.moduleId === filters.moduleId) ?? [];
+  const generatedByOptions = Array.from(new Set(history.map((item) => item.generatedBy)));
+
+  const updateFilter = (key: keyof HistoryFilters, value: string) => {
+    const next = { ...filters, [key]: value || undefined };
+    if (key === "projectId") {
+      next.moduleId = undefined;
+      next.requirementId = undefined;
+      onSelectProject(value);
+    }
+    if (key === "moduleId") next.requirementId = undefined;
+    onFiltersChange(next);
+  };
+
+  const toggleExportSelection = (historyId: string) => {
+    setSelectedExportIds((current) =>
+      current.includes(historyId)
+        ? current.filter((item) => item !== historyId)
+        : [...current, historyId],
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            <History className="mr-1 size-3" /> Versioned QA output
+          </Badge>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">
+            Test Case History
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Review saved test case generations, compare versions, update approval status, and export QA artifacts.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <ExportDropdown
+            label="Export Filtered"
+            disabled={isExporting || history.length === 0}
+            onExport={(format) => onExportFiltered(filters, format)}
+          />
+          {isLoading && <Loader2 className="size-5 animate-spin text-muted-foreground" />}
+        </div>
+      </div>
+
+      <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+        <div className="mb-4 flex items-center gap-2">
+          <Search className="size-4 text-primary" />
+          <h2 className="font-semibold">Filters</h2>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Input
+            value={filters.search ?? ""}
+            onChange={(event) => updateFilter("search", event.target.value)}
+            placeholder="Search requirement, test case, project..."
+          />
+          <Select value={filters.projectId ?? "all"} onValueChange={(value) => updateFilter("projectId", value === "all" ? "" : value)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Project" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All projects</SelectItem>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filters.moduleId ?? "all"} onValueChange={(value) => updateFilter("moduleId", value === "all" ? "" : value)} disabled={!filters.projectId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Module" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All modules</SelectItem>
+              {modules.map((moduleItem) => (
+                <SelectItem key={moduleItem.id} value={moduleItem.id}>
+                  {moduleItem.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filters.requirementId ?? "all"} onValueChange={(value) => updateFilter("requirementId", value === "all" ? "" : value)} disabled={!filters.projectId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Requirement" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All requirements</SelectItem>
+              {requirements.map((requirement) => (
+                <SelectItem key={requirement.id} value={requirement.id}>
+                  {requirement.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filters.status ?? "all"} onValueChange={(value) => updateFilter("status", value === "all" ? "" : value)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {["Draft", "Reviewed", "Approved"].map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filters.generatedBy ?? "all"} onValueChange={(value) => updateFilter("generatedBy", value === "all" ? "" : value)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Generated by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Anyone</SelectItem>
+              {generatedByOptions.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input type="date" value={filters.dateFrom ?? ""} onChange={(event) => updateFilter("dateFrom", event.target.value)} />
+          <Input type="date" value={filters.dateTo ?? ""} onChange={(event) => updateFilter("dateTo", event.target.value)} />
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            value={filters.minCoverage ?? ""}
+            onChange={(event) => updateFilter("minCoverage", event.target.value)}
+            placeholder="Min coverage"
+          />
+        </div>
+      </Card>
+
+      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="size-4 text-primary" />
+              <h2 className="font-semibold">History Records</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">{history.length} records</Badge>
+              <ExportDropdown
+                label="Export Selected"
+                disabled={isExporting || selectedExportIds.length === 0}
+                onExport={(format) => onExportVersions(selectedExportIds, format)}
+              />
+            </div>
+          </div>
+          {history.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
+              <History className="mx-auto size-8 text-muted-foreground" />
+              <p className="mt-3 text-sm text-muted-foreground">No generated history yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {history.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "rounded-lg border bg-surface/40 p-4 transition-colors",
+                    selectedHistory?.id === item.id ? "border-primary/50" : "border-border/40 hover:border-primary/30",
+                  )}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedExportIds.includes(item.id)}
+                          onChange={() => toggleExportSelection(item.id)}
+                          aria-label={`Select version ${item.version} for export`}
+                          className="size-4 accent-primary"
+                        />
+                        <button type="button" onClick={() => onSelectHistory(item.id)} className="text-left">
+                          <p className="font-semibold">{item.requirementTitle}</p>
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {item.projectName} / {item.moduleName}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={cn("text-xs", historyStatusClass(item.status))}>
+                      {item.status}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                    <span>Version {item.version}</span>
+                    <span>{item.coverageScore}% coverage</span>
+                    <span>{item.generatedBy}</span>
+                    <span>{formatDate(item.generatedAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <div className="space-y-5">
+          {selectedHistory ? (
+            <>
+              <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold">{selectedHistory.requirementTitle}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Version {selectedHistory.version} generated on {formatDate(selectedHistory.generatedAt)} by {selectedHistory.generatedBy}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">AI model: {selectedHistory.aiModelUsed}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={selectedHistory.status}
+                      onValueChange={(status) => onStatusChange(selectedHistory.id, status as HistoryStatus)}
+                    >
+                      <SelectTrigger className="h-9 w-[140px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Draft">Draft</SelectItem>
+                        <SelectItem value="Reviewed">Reviewed</SelectItem>
+                        <SelectItem value="Approved">Approved</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <ExportDropdown
+                      disabled={isExporting}
+                      onExport={(format) => onExportVersions([selectedHistory.id], format)}
+                    />
+                    <ExportDropdown
+                      label="Export Requirement"
+                      disabled={isExporting}
+                      onExport={(format) => onExportRequirement(selectedHistory.requirementId, format)}
+                    />
+                    <ExportDropdown
+                      label="Export Project"
+                      disabled={isExporting}
+                      onExport={(format) => onExportProject(selectedHistory.projectId, format)}
+                    />
+                    <Button variant="outline" size="sm" onClick={() => onDelete(selectedHistory.id)}>
+                      <Trash2 className="size-3.5" /> Delete
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-5 rounded-lg border border-border/40 bg-surface/40 p-4">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Requirement Input
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm">{selectedHistory.requirementInput}</p>
+                </div>
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className="font-medium">Coverage Score</span>
+                    <span className="font-mono text-xs text-muted-foreground">{selectedHistory.coverageScore}%</span>
+                  </div>
+                  <Progress value={selectedHistory.coverageScore} className="h-2.5" />
+                </div>
+              </Card>
+
+              <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+                <div className="mb-4 flex items-center gap-2">
+                  <History className="size-4 text-primary" />
+                  <h3 className="font-semibold">Version Timeline</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedRequirementVersions.map((item) => (
+                    <Button
+                      key={item.id}
+                      variant={item.id === selectedHistory.id ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => onSelectHistory(item.id)}
+                    >
+                      Version {item.version} - {formatDate(item.generatedAt)}
+                    </Button>
+                  ))}
+                </div>
+              </Card>
+
+              <CompareVersionsPanel
+                history={selectedRequirementVersions}
+                compareFromId={compareFromId}
+                compareToId={compareToId}
+                comparison={comparison}
+                onCompareFromChange={onCompareFromChange}
+                onCompareToChange={onCompareToChange}
+                onCompare={onCompare}
+              />
+
+              <Results plan={selectedHistory.output} />
+            </>
+          ) : (
+            <Card className="border-dashed border-border/50 bg-card/30 p-10 text-center backdrop-blur">
+              <History className="mx-auto size-8 text-muted-foreground" />
+              <p className="mt-3 text-sm text-muted-foreground">Select a history record to view details.</p>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      <ExportHistoryTable exports={exportHistory} />
+    </div>
+  );
+}
+
+function ExportHistoryTable({ exports }: { exports: ExportHistoryRecord[] }) {
+  return (
+    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+      <div className="mb-4 flex items-center gap-2">
+        <Download className="size-4 text-primary" />
+        <h2 className="font-semibold">Export History</h2>
+      </div>
+      {exports.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+          No exports have been generated yet.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <thead className="bg-surface/60 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left">User</th>
+                <th className="px-3 py-2 text-left">Export Type</th>
+                <th className="px-3 py-2 text-left">Format</th>
+                <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-left">Records</th>
+              </tr>
+            </thead>
+            <tbody>
+              {exports.map((item) => (
+                <tr key={item.id} className="border-t border-border/40">
+                  <td className="px-3 py-2">{item.userId}</td>
+                  <td className="px-3 py-2 capitalize">{item.exportType}</td>
+                  <td className="px-3 py-2 capitalize">{item.exportFormat}</td>
+                  <td className="px-3 py-2">{formatDate(item.createdAt)}</td>
+                  <td className="px-3 py-2">{item.totalRecords}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function CompareVersionsPanel({
+  history,
+  compareFromId,
+  compareToId,
+  comparison,
+  onCompareFromChange,
+  onCompareToChange,
+  onCompare,
+}: {
+  history: TestCaseHistoryRecord[];
+  compareFromId: string;
+  compareToId: string;
+  comparison: TestCaseHistoryCompare | null;
+  onCompareFromChange: (historyId: string) => void;
+  onCompareToChange: (historyId: string) => void;
+  onCompare: () => void;
+}) {
+  return (
+    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+      <div className="mb-4 flex items-center gap-2">
+        <GitCompare className="size-4 text-primary" />
+        <h3 className="font-semibold">Compare Versions</h3>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+        <Select value={compareFromId} onValueChange={onCompareFromChange}>
+          <SelectTrigger>
+            <SelectValue placeholder="From version" />
+          </SelectTrigger>
+          <SelectContent>
+            {history.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                Version {item.version} ({item.coverageScore}%)
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={compareToId} onValueChange={onCompareToChange}>
+          <SelectTrigger>
+            <SelectValue placeholder="To version" />
+          </SelectTrigger>
+          <SelectContent>
+            {history.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                Version {item.version} ({item.coverageScore}%)
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button onClick={onCompare}>
+          <GitCompare className="size-4" />
+          Compare
+        </Button>
+      </div>
+      {comparison && (
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+            <p className="font-semibold">Coverage Difference</p>
+            <p className="mt-2 font-display text-3xl font-semibold">
+              {comparison.from.coverageScore}% to {comparison.to.coverageScore}%
+            </p>
+            <Badge
+              variant="outline"
+              className={cn(
+                "mt-3",
+                comparison.coverageDifference >= 0
+                  ? "border-success/40 bg-success/10 text-success"
+                  : "border-destructive/40 bg-destructive/10 text-destructive",
+              )}
+            >
+              {comparison.coverageDifference >= 0 ? "+" : ""}
+              {comparison.coverageDifference}% improvement
+            </Badge>
+          </div>
+          <div className="grid gap-3">
+            <CompareList title="Added test cases" items={comparison.addedTestCases} tone="success" />
+            <CompareList title="Removed test cases" items={comparison.removedTestCases} tone="danger" />
+            <CompareList title="Updated test cases" items={comparison.updatedTestCases} tone="warning" />
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function CompareList({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: "success" | "danger" | "warning";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "text-success"
+      : tone === "danger"
+        ? "text-destructive"
+        : "text-warning";
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+      <p className={cn("text-sm font-semibold", toneClass)}>{title}</p>
+      {items.length ? (
+        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">No changes detected.</p>
+      )}
+    </div>
+  );
+}
+
+const QUICK_CHAT_PROMPTS = [
+  "What test cases are missing?",
+  "Improve coverage score",
+  "Generate more security test cases",
+  "Generate API test cases",
+  "Suggest edge cases",
+  "Create regression test cases",
+  "Explain this requirement",
+  "Generate Playwright tests",
+];
+
+function AIChatPage({
+  projects,
+  projectDetail,
+  selectedProjectId,
+  selectedModuleId,
+  selectedRequirementId,
+  activeChat,
+  chatHistory,
+  message,
+  selectedHistoryVersionId,
+  isLoading,
+  onProjectChange,
+  onModuleChange,
+  onRequirementChange,
+  onMessageChange,
+  onHistoryVersionChange,
+  onSend,
+  onOpenChat,
+  onDeleteChat,
+  onNewChat,
+  onSaveAsVersion,
+}: {
+  projects: ProjectSummary[];
+  projectDetail: ProjectDetail | null;
+  selectedProjectId: string;
+  selectedModuleId: string;
+  selectedRequirementId: string;
+  activeChat: AIChat | null;
+  chatHistory: AIChatSummary[];
+  message: string;
+  selectedHistoryVersionId: string;
+  isLoading: boolean;
+  onProjectChange: (projectId: string) => void;
+  onModuleChange: (moduleId: string) => void;
+  onRequirementChange: (requirementId: string) => void;
+  onMessageChange: (message: string) => void;
+  onHistoryVersionChange: (historyVersionId: string) => void;
+  onSend: (prompt?: string) => void;
+  onOpenChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => void;
+  onNewChat: () => void;
+  onSaveAsVersion: () => void;
+}) {
+  const modules = projectDetail?.modules.filter((moduleItem) => moduleItem.status === "Active") ?? [];
+  const requirements =
+    projectDetail?.requirements.filter((item) => item.moduleId === selectedModuleId) ?? [];
+  const versions =
+    projectDetail?.histories
+      .filter((item) => item.requirementId === selectedRequirementId)
+      .sort((a, b) => b.version - a.version) ?? [];
+  const hasContext = selectedProjectId && selectedModuleId && selectedRequirementId;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+          <Bot className="mr-1 size-3" /> Context-aware QA assistant
+        </Badge>
+        <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">AI Chat</h1>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          Chat with AI using the selected project, module, requirement, and generated test cases as context.
+        </p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+        <div className="space-y-4">
+          <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FolderKanban className="size-4 text-primary" />
+                <h2 className="font-semibold">Context</h2>
+              </div>
+              <Button variant="outline" size="sm" onClick={onNewChat}>
+                <Plus className="size-3.5" />
+                New
+              </Button>
+            </div>
+            <div className="space-y-3">
+              <Select value={selectedProjectId} onValueChange={onProjectChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedModuleId} onValueChange={onModuleChange} disabled={!selectedProjectId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select module" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modules.map((moduleItem) => (
+                    <SelectItem key={moduleItem.id} value={moduleItem.id}>
+                      {moduleItem.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={selectedRequirementId}
+                onValueChange={onRequirementChange}
+                disabled={!selectedModuleId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select requirement" />
+                </SelectTrigger>
+                <SelectContent>
+                  {requirements.map((requirement) => (
+                    <SelectItem key={requirement.id} value={requirement.id}>
+                      {requirement.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={(activeChat?.historyVersionId ?? selectedHistoryVersionId) || "latest"}
+                onValueChange={(value) => onHistoryVersionChange(value === "latest" ? "" : value)}
+                disabled={!versions.length || Boolean(activeChat)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Latest test version" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="latest">Latest generated version</SelectItem>
+                  {versions.map((version) => (
+                    <SelectItem key={version.id} value={version.id}>
+                      Version {version.version} ({version.coverageScore}%)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </Card>
+
+          <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+            <div className="mb-4 flex items-center gap-2">
+              <MessageSquare className="size-4 text-primary" />
+              <h2 className="font-semibold">Previous Chats</h2>
+            </div>
+            {chatHistory.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border/50 p-5 text-sm text-muted-foreground">
+                No chat history yet.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {chatHistory.map((chat) => (
+                  <div key={chat.id} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                    <p className="text-sm font-medium">{chat.requirementTitle}</p>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{chat.lastMessage}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{formatDate(chat.updatedAt)}</p>
+                    <div className="mt-3 flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => onOpenChat(chat.id)}>
+                        View Chat
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => onDeleteChat(chat.id)}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <Card className="flex min-h-[720px] flex-col border-border/50 bg-card/70 backdrop-blur-xl shadow-card">
+          {!hasContext ? (
+            <div className="flex flex-1 items-center justify-center p-10 text-center">
+              <div>
+                <Bot className="mx-auto size-10 text-muted-foreground" />
+                <p className="mt-4 font-medium">Select a project, module, and requirement to start chatting.</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  AI answers will be limited to the selected requirement context.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="border-b border-border/40 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold">{activeChat?.title ?? "New requirement chat"}</h2>
+                    <p className="text-xs text-muted-foreground">
+                      {projectDetail?.project.name} / {modules.find((item) => item.id === selectedModuleId)?.name}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onSaveAsVersion}
+                    disabled={!activeChat || isLoading}
+                  >
+                    <History className="size-3.5" />
+                    Save as New Version
+                  </Button>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {QUICK_CHAT_PROMPTS.map((prompt) => (
+                    <Button
+                      key={prompt}
+                      variant="outline"
+                      size="sm"
+                      disabled={isLoading}
+                      onClick={() => onSend(prompt)}
+                    >
+                      {prompt}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                {!activeChat?.messages.length ? (
+                  <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
+                    <Bot className="mx-auto size-8 text-muted-foreground" />
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Ask about missing cases, risks, coverage, security testing, API scenarios, or Playwright code.
+                    </p>
+                  </div>
+                ) : (
+                  activeChat.messages.map((chatItem, index) => (
+                    <ChatBubble key={`${chatItem.createdAt}-${index}`} message={chatItem} />
+                  ))
+                )}
+                {isLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    AI is thinking...
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-border/40 p-5">
+                <div className="flex gap-3">
+                  <Textarea
+                    value={message}
+                    onChange={(event) => onMessageChange(event.target.value)}
+                    placeholder="Ask AI about this requirement..."
+                    className="min-h-[72px] resize-none border-border/60 bg-input/40"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) onSend();
+                    }}
+                  />
+                  <Button
+                    className="self-end bg-gradient-primary text-primary-foreground shadow-glow"
+                    disabled={isLoading || !message.trim()}
+                    onClick={() => onSend()}
+                  >
+                    {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    Send
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({ message }: { message: { role: "user" | "assistant"; content: string } }) {
+  const isUser = message.role === "user";
+  const copy = () => {
+    navigator.clipboard.writeText(message.content);
+    toast.success("Copied response");
+  };
+
+  return (
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "max-w-[86%] rounded-lg border p-4 text-sm",
+          isUser
+            ? "border-primary/40 bg-primary/10"
+            : "border-border/40 bg-surface/50",
+        )}
+      >
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {isUser ? "You" : "AI Copilot"}
+          </span>
+          {!isUser && (
+            <Button variant="ghost" size="icon" onClick={copy}>
+              <Copy className="size-3.5" />
+            </Button>
+          )}
+        </div>
+        <MarkdownLite content={message.content} />
+      </div>
+    </div>
+  );
+}
+
+function MarkdownLite({ content }: { content: string }) {
+  const blocks = content.split(/```/);
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, index) => {
+        if (index % 2 === 1) {
+          const code = block.replace(/^[a-zA-Z]+\n/, "");
+          return (
+            <div key={index} className="overflow-hidden rounded-md border border-border/40 bg-[oklch(0.14_0.02_260)]">
+              <div className="flex justify-end border-b border-border/40 px-2 py-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(code);
+                    toast.success("Copied code");
+                  }}
+                >
+                  <Copy className="size-3.5" />
+                  Copy code
+                </Button>
+              </div>
+              <pre className="overflow-auto p-3 font-mono text-xs text-foreground/90">
+                <code>{code}</code>
+              </pre>
+            </div>
+          );
+        }
+        return (
+          <div key={index} className="whitespace-pre-wrap leading-relaxed">
+            {block}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -414,7 +2629,46 @@ function CaseList({ cases, accent }: { cases: TestCase[]; accent: string }) {
   );
 }
 
-function Results({ plan }: { plan: TestPlan }) {
+function ExportDropdown({
+  label = "Export",
+  disabled,
+  onExport,
+}: {
+  label?: string;
+  disabled?: boolean;
+  onExport: (format: ExportFormat) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={disabled} className="border-border/60">
+          {disabled ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+          {label}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onExport("excel")}>
+          <Download className="size-4" />
+          Export as Excel (.xlsx)
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onExport("pdf")}>
+          <Download className="size-4" />
+          Export as PDF (.pdf)
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function Results({
+  plan,
+  onExport,
+  isExporting,
+}: {
+  plan: TestPlan;
+  onExport?: (format: ExportFormat) => void;
+  isExporting?: boolean;
+}) {
   const copyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(plan, null, 2));
     toast.success("Copied JSON to clipboard");
@@ -434,9 +2688,12 @@ function Results({ plan }: { plan: TestPlan }) {
           </div>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{plan.summary}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={copyJson} className="border-border/60">
-          <Copy className="size-3.5" /> Copy JSON
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {onExport && <ExportDropdown disabled={isExporting} onExport={onExport} />}
+          <Button variant="outline" size="sm" onClick={copyJson} className="border-border/60">
+            <Copy className="size-3.5" /> Copy JSON
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="positive" className="mt-6">
