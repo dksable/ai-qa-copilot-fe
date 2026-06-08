@@ -5,4 +5,15 @@ import tsConfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [viteReact(), tailwindcss(), tsConfigPaths()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/recharts")) return "charts";
+          if (id.includes("node_modules/@radix-ui")) return "ui";
+          if (id.includes("node_modules")) return "vendor";
+        },
+      },
+    },
+  },
 });

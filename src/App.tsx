@@ -40,6 +40,13 @@ import {
   Users,
   BarChart3,
   TrendingUp,
+  Bell,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Command,
+  UserCircle,
+  ChevronDown,
 } from "lucide-react";
 import {
   Area,
@@ -139,7 +146,7 @@ import type {
 } from "@/lib/api/coverageScore";
 
 type Theme = "light" | "dark";
-type ActiveView = "generator" | "projects" | "history" | "review" | "chat" | "workspace" | "analytics";
+type ActiveView = "landing" | "generator" | "projects" | "history" | "review" | "chat" | "workspace" | "analytics";
 
 interface AnalyticsBundle {
   summary: AnalyticsSummary;
@@ -172,7 +179,7 @@ export default function App() {
   );
   const [plan, setPlan] = useState<TestPlan | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [activeView, setActiveView] = useState<ActiveView>("generator");
+  const [activeView, setActiveView] = useState<ActiveView>("landing");
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
   const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
@@ -206,6 +213,8 @@ export default function App() {
   const [analytics, setAnalytics] = useState<AnalyticsBundle | null>(null);
   const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilters>({});
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -401,20 +410,37 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden bg-background">
       {/* ambient background */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-hero" />
-      <div className="pointer-events-none absolute -top-32 left-1/2 h-[480px] w-[900px] -translate-x-1/2 rounded-full bg-gradient-mesh blur-3xl opacity-60" />
 
       <Nav
         theme={theme}
         activeView={activeView}
         onChangeView={setActiveView}
         onToggleTheme={toggleTheme}
+        workspaces={workspaces}
+        selectedWorkspaceId={selectedWorkspaceId}
+        onWorkspaceChange={(workspaceId) => void refreshWorkspace(workspaceId)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
+        isMobileOpen={isMobileNavOpen}
+        onMobileOpenChange={setIsMobileNavOpen}
       />
 
-      <main className="relative mx-auto max-w-6xl px-6 pb-24 pt-10 lg:pt-16">
-        {activeView === "generator" ? (
+      <main
+        className={cn(
+          "relative min-h-screen px-4 pb-16 pt-24 transition-[padding] duration-300 sm:px-6 lg:pt-24",
+          isSidebarCollapsed ? "lg:pl-28 lg:pr-8" : "lg:pl-80 lg:pr-8",
+        )}
+      >
+        <div className="mx-auto max-w-[1480px]">
+        {activeView === "landing" ? (
+          <LandingPage
+            onStart={() => setActiveView("generator")}
+            onBookDemo={() => toast.success("Demo request captured. Sales will follow up shortly.")}
+          />
+        ) : activeView === "generator" ? (
           <>
             <Hero />
 
@@ -717,6 +743,7 @@ export default function App() {
             onRefresh={() => refreshWorkspace(selectedWorkspaceId)}
           />
         )}
+        </div>
       </main>
 
       <Toaster richColors theme={theme} position="top-right" />
@@ -729,66 +756,245 @@ function Nav({
   activeView,
   onChangeView,
   onToggleTheme,
+  workspaces,
+  selectedWorkspaceId,
+  onWorkspaceChange,
+  isCollapsed,
+  onToggleCollapsed,
+  isMobileOpen,
+  onMobileOpenChange,
 }: {
   theme: Theme;
   activeView: ActiveView;
   onChangeView: (view: ActiveView) => void;
   onToggleTheme: () => void;
+  workspaces: Workspace[];
+  selectedWorkspaceId: string;
+  onWorkspaceChange: (workspaceId: string) => void;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  isMobileOpen: boolean;
+  onMobileOpenChange: (open: boolean) => void;
 }) {
   const isDark = theme === "dark";
-  const navItems: Array<{ label: string; value: ActiveView; icon: typeof Wand2 }> = [
-    { label: "Generator", value: "generator", icon: Wand2 },
-    { label: "Projects", value: "projects", icon: FolderKanban },
-    { label: "Test Case History", value: "history", icon: History },
-    { label: "Review Queue", value: "review", icon: ClipboardList },
-    { label: "AI Chat", value: "chat", icon: Bot },
-    { label: "Team Workspace", value: "workspace", icon: Users },
-    { label: "Analytics", value: "analytics", icon: BarChart3 },
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
+  const navItems: Array<{
+    label: string;
+    value: ActiveView;
+    icon: typeof Wand2;
+    description: string;
+  }> = [
+    { label: "Landing", value: "landing", icon: Rocket, description: "Marketing site" },
+    { label: "Generator", value: "generator", icon: Wand2, description: "Create AI QA assets" },
+    { label: "Projects", value: "projects", icon: FolderKanban, description: "Projects and modules" },
+    { label: "Test History", value: "history", icon: History, description: "Versions and exports" },
+    { label: "Review Queue", value: "review", icon: ClipboardList, description: "Approvals" },
+    { label: "AI Chat", value: "chat", icon: Bot, description: "Requirement assistant" },
+    { label: "Team Workspace", value: "workspace", icon: Users, description: "Members and roles" },
+    { label: "Analytics", value: "analytics", icon: BarChart3, description: "Coverage and productivity" },
   ];
 
+  const navigate = (view: ActiveView) => {
+    onChangeView(view);
+    onMobileOpenChange(false);
+  };
+
   return (
-    <header className="relative z-10 border-b border-border/40 bg-background/40 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-2">
-          <div className="flex size-8 items-center justify-center rounded-md bg-gradient-primary shadow-glow">
-            <Beaker className="size-4 text-primary-foreground" />
+    <>
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 hidden border-r border-border/50 bg-card/80 shadow-card backdrop-blur-xl transition-all duration-300 lg:flex lg:flex-col",
+          isCollapsed ? "w-20" : "w-72",
+        )}
+      >
+        <div className="flex h-16 items-center gap-3 border-b border-border/40 px-4">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-primary shadow-glow">
+            <Beaker className="size-5 text-primary-foreground" />
           </div>
-          <span className="font-display text-lg font-semibold tracking-tight">
-            AI QA <span className="text-gradient">Copilot</span>
-          </span>
+          {!isCollapsed && (
+            <div className="min-w-0">
+              <p className="truncate font-display text-base font-semibold">AI QA Copilot</p>
+              <p className="truncate text-xs text-muted-foreground">Enterprise QA intelligence</p>
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleCollapsed}
+            className="ml-auto size-8"
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </Button>
         </div>
-        <div className="flex items-center gap-2 md:gap-4">
-          <nav className="hidden items-center gap-2 text-sm text-muted-foreground md:flex">
-            {navItems.map(({ label, value, icon: Icon }) => (
-              <Button
-                key={value}
-                type="button"
-                variant={activeView === value ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => onChangeView(value)}
-              >
-                <Icon className="size-4" />
-                {label}
-              </Button>
-            ))}
-            <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
-              Powered by AI
-            </Badge>
-          </nav>
+
+        <div className="border-b border-border/40 p-4">
+          <Select value={selectedWorkspaceId || "none"} onValueChange={onWorkspaceChange}>
+            <SelectTrigger
+              className={cn(
+                "h-11 border-border/60 bg-surface/60",
+                isCollapsed && "justify-center px-2 [&>span]:hidden",
+              )}
+              aria-label="Select workspace"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
+                  {(activeWorkspace?.workspaceName ?? "W").slice(0, 1)}
+                </div>
+                {!isCollapsed && <SelectValue placeholder="Workspace" />}
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              {workspaces.length ? (
+                workspaces.map((workspace) => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    {workspace.workspaceName}
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectItem value="none">Default workspace</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {navItems.map(({ label, value, icon: Icon, description }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => navigate(value)}
+              className={cn(
+                "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                activeView === value
+                  ? "bg-primary/12 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--primary)_35%,transparent)]"
+                  : "text-muted-foreground hover:bg-surface/70 hover:text-foreground",
+                isCollapsed && "justify-center px-2",
+              )}
+              title={isCollapsed ? label : undefined}
+              aria-current={activeView === value ? "page" : undefined}
+            >
+              <Icon className={cn("size-4 shrink-0", activeView === value && "text-primary")} />
+              {!isCollapsed && (
+                <span className="min-w-0">
+                  <span className="block font-medium">{label}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{description}</span>
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        <div className="border-t border-border/40 p-3">
+          <div className={cn("flex items-center gap-3 rounded-lg bg-surface/50 p-3", isCollapsed && "justify-center p-2")}>
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-primary text-sm font-semibold text-primary-foreground">
+              DS
+            </div>
+            {!isCollapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">Durgesh Sable</p>
+                <p className="truncate text-xs text-muted-foreground">Owner workspace</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {isMobileOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-background/70 backdrop-blur-sm lg:hidden"
+          aria-label="Close navigation"
+          onClick={() => onMobileOpenChange(false)}
+        />
+      )}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 w-72 border-r border-border/50 bg-card/95 shadow-card backdrop-blur-xl transition-transform lg:hidden",
+          isMobileOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        <div className="flex h-16 items-center gap-3 border-b border-border/40 px-4">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-primary shadow-glow">
+            <Beaker className="size-5 text-primary-foreground" />
+          </div>
+          <div>
+            <p className="font-display text-base font-semibold">AI QA Copilot</p>
+            <p className="text-xs text-muted-foreground">Enterprise QA intelligence</p>
+          </div>
+        </div>
+        <nav className="space-y-1 p-3">
+          {navItems.map(({ label, value, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => navigate(value)}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors",
+                activeView === value ? "bg-primary/12 text-foreground" : "text-muted-foreground hover:bg-surface/70",
+              )}
+            >
+              <Icon className="size-4" />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <header
+        className={cn(
+          "fixed left-0 right-0 top-0 z-30 border-b border-border/40 bg-background/70 backdrop-blur-xl transition-[padding] duration-300",
+          isCollapsed ? "lg:pl-20" : "lg:pl-72",
+        )}
+      >
+        <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
           <Button
             type="button"
             variant="outline"
             size="icon"
-            onClick={onToggleTheme}
-            aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
-            title={`Switch to ${isDark ? "light" : "dark"} mode`}
-            className="size-9 border-border/60 bg-background/60 backdrop-blur"
+            className="size-9 lg:hidden"
+            onClick={() => onMobileOpenChange(true)}
+            aria-label="Open navigation"
           >
-            {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            <Menu className="size-4" />
           </Button>
+
+          <div className="hidden min-w-0 flex-1 items-center gap-2 rounded-lg border border-border/50 bg-surface/50 px-3 py-2 text-sm text-muted-foreground shadow-sm md:flex">
+            <Search className="size-4" />
+            <span className="truncate">Search projects, requirements, histories...</span>
+            <kbd className="ml-auto rounded border border-border/60 bg-background/70 px-1.5 py-0.5 text-[10px]">
+              <Command className="inline size-3" /> K
+            </kbd>
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            <Badge variant="outline" className="hidden border-primary/40 bg-primary/10 text-primary sm:flex">
+              Demo ready
+            </Badge>
+            <Button type="button" variant="outline" size="icon" className="size-9" aria-label="Notifications">
+              <Bell className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onToggleTheme}
+              aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
+              title={`Switch to ${isDark ? "light" : "dark"} mode`}
+              className="size-9"
+            >
+              {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </Button>
+            <Button type="button" variant="outline" className="hidden h-9 gap-2 px-2 sm:flex">
+              <UserCircle className="size-4" />
+              <span className="text-sm">Durgesh</span>
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            </Button>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+    </>
   );
 }
 
@@ -1067,34 +1273,41 @@ function ProjectsPage({
 
 function DashboardCards({ dashboard }: { dashboard: DashboardStats | null }) {
   const items = [
-    { label: "Total Projects", value: dashboard?.totalProjects ?? 0, icon: FolderKanban },
-    { label: "Active Projects", value: dashboard?.activeProjects ?? 0, icon: CheckCircle2 },
-    { label: "Modules", value: dashboard?.totalModules ?? 0, icon: Boxes },
-    { label: "Requirements", value: dashboard?.totalRequirements ?? 0, icon: FileText },
-    { label: "Test Cases", value: dashboard?.totalTestCases ?? 0, icon: ClipboardCheck },
-    { label: "Avg Coverage", value: `${dashboard?.averageTestCoverageScore ?? 0}%`, icon: Gauge },
-    { label: "Pending Reviews", value: dashboard?.pendingReviews ?? 0, icon: ClipboardList },
-    { label: "Approved", value: dashboard?.approvedTestCases ?? 0, icon: CheckCircle2 },
-    { label: "Changes Requested", value: dashboard?.changesRequested ?? 0, icon: AlertTriangle },
-    { label: "Rejected", value: dashboard?.rejectedItems ?? 0, icon: XCircle },
+    { label: "Total Projects", value: dashboard?.totalProjects ?? 0, icon: FolderKanban, trend: "Portfolio scope" },
+    { label: "Active Projects", value: dashboard?.activeProjects ?? 0, icon: CheckCircle2, trend: "Ready for delivery" },
+    { label: "Modules", value: dashboard?.totalModules ?? 0, icon: Boxes, trend: "Product areas" },
+    { label: "Requirements", value: dashboard?.totalRequirements ?? 0, icon: FileText, trend: "Tracked stories" },
+    { label: "Test Cases", value: dashboard?.totalTestCases ?? 0, icon: ClipboardCheck, trend: "Generated coverage" },
+    { label: "Avg Coverage", value: `${dashboard?.averageTestCoverageScore ?? 0}%`, icon: Gauge, trend: "Quality signal" },
+    { label: "Pending Reviews", value: dashboard?.pendingReviews ?? 0, icon: ClipboardList, trend: "Needs lead action" },
+    { label: "Approved", value: dashboard?.approvedTestCases ?? 0, icon: CheckCircle2, trend: "Export-ready" },
+    { label: "Changes Requested", value: dashboard?.changesRequested ?? 0, icon: AlertTriangle, trend: "Iteration needed" },
+    { label: "Rejected", value: dashboard?.rejectedItems ?? 0, icon: XCircle, trend: "Blocked versions" },
     {
       label: "Avg Approval Time",
       value: `${dashboard?.averageApprovalTimeHours ?? 0}h`,
       icon: CalendarDays,
+      trend: "Review velocity",
     },
   ];
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-      {items.map(({ label, value, icon: Icon }) => (
-        <Card key={label} className="border-border/50 bg-card/60 p-4 backdrop-blur">
+      {items.map(({ label, value, icon: Icon, trend }) => (
+        <Card key={label} className="app-card p-4">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {label}
             </p>
-            <Icon className="size-4 text-primary" />
+            <span className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Icon className="size-4" />
+            </span>
           </div>
           <p className="mt-3 font-display text-2xl font-semibold">{value}</p>
+          <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+            <TrendingUp className="size-3 text-success" />
+            {trend}
+          </p>
         </Card>
       ))}
     </div>
@@ -1219,6 +1432,10 @@ function ProjectList({
   onSelectProject: (projectId: string) => void;
   onRefresh: () => void;
 }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const visibleProjects = projects.filter((project) =>
+    [project.name, project.description, project.domain].join(" ").toLowerCase().includes(searchTerm.toLowerCase()),
+  );
   const archiveProject = async (projectId: string) => {
     if (!window.confirm("Archive this project?")) return;
     await projectApi.archiveProject(projectId);
@@ -1235,22 +1452,40 @@ function ProjectList({
   };
 
   return (
-    <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
-      <div className="mb-4 flex items-center justify-between">
+    <Card className="app-card p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <FolderKanban className="size-4 text-primary" />
           <h2 className="text-base font-semibold">All Projects</h2>
         </div>
         {isLoading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
       </div>
+      <div className="mb-4 flex items-center gap-2 rounded-lg border border-border/50 bg-surface/50 px-3 py-2">
+        <Search className="size-4 text-muted-foreground" />
+        <Input
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Search projects"
+          className="h-7 border-0 bg-transparent px-0 focus-visible:ring-0"
+        />
+      </div>
       {projects.length === 0 ? (
+        <ProfessionalEmptyState
+          icon={FolderKanban}
+          title="No projects found"
+          message="Create a project to organize modules, requirements, generated versions, and review workflows."
+          actionLabel="Create from top action"
+        />
+      ) : visibleProjects.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
           <FolderKanban className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">No projects yet.</p>
+          <p className="mt-3 text-sm text-muted-foreground">No projects match your search.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {projects.map((project) => (
+          {visibleProjects.map((project) => {
+            const health = project.totalTestCases === 0 ? "Needs Attention" : project.status === "Active" ? "Healthy" : "Archived";
+            return (
             <div
               key={project.id}
               className={cn(
@@ -1267,19 +1502,23 @@ function ProjectList({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold">{project.name}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold">{project.name}</h3>
+                      <Badge variant="outline" className={cn("text-xs", health === "Healthy" ? "border-success/40 bg-success/10 text-success" : "border-warning/40 bg-warning/10 text-warning")}>
+                        {health}
+                      </Badge>
+                    </div>
                     <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                       {project.description}
                     </p>
                   </div>
-                  <Badge variant="outline" className={cn("text-xs", statusClass(project.status))}>
-                    {project.status}
-                  </Badge>
+                  <Badge variant="outline" className={cn("text-xs", statusClass(project.status))}>{project.status}</Badge>
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                <div className="mt-4 grid grid-cols-4 gap-2 text-xs text-muted-foreground">
                   <span>{project.totalModules} modules</span>
                   <span>{project.totalRequirements} reqs</span>
                   <span>{project.totalTestCases} tests</span>
+                  <span>{project.domain}</span>
                 </div>
                 <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                   <CalendarDays className="size-3.5" />
@@ -1297,7 +1536,7 @@ function ProjectList({
                 </Button>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
     </Card>
@@ -1404,6 +1643,33 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
     <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 font-display text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function ProfessionalEmptyState({
+  icon: Icon,
+  title,
+  message,
+  actionLabel,
+}: {
+  icon: typeof Wand2;
+  title: string;
+  message: string;
+  actionLabel?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-dashed border-border/60 bg-surface/30 p-8 text-center">
+      <div className="mx-auto flex size-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Icon className="size-5" />
+      </div>
+      <h3 className="mt-4 font-semibold">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">{message}</p>
+      {actionLabel && (
+        <Badge variant="outline" className="mt-4 border-primary/30 bg-primary/10 text-primary">
+          {actionLabel}
+        </Badge>
+      )}
     </div>
   );
 }
@@ -2319,6 +2585,314 @@ function CompareList({
   );
 }
 
+function LandingPage({ onStart, onBookDemo }: { onStart: () => void; onBookDemo: () => void }) {
+  const heroFeatures = [
+    { icon: Wand2, label: "AI Test Case Generation" },
+    { icon: Bot, label: "AI Chat with Requirement" },
+    { icon: Gauge, label: "Test Coverage Analysis" },
+    { icon: ClipboardList, label: "Review & Approval Workflow" },
+  ];
+  const painPoints = [
+    "Manual test case creation",
+    "Coverage gaps",
+    "Requirement changes",
+    "Review bottlenecks",
+    "Scattered QA documentation",
+  ];
+  const features = [
+    ["AI Test Case Generation", "Generate positive, negative, edge, API, UI, and regression scenarios."],
+    ["AI Chat with Requirement", "Ask context-aware QA questions against selected requirements and versions."],
+    ["Test Coverage Score", "Quantify coverage and surface missing areas before release."],
+    ["Requirement Change Impact Analysis", "Understand what must be retested when requirements evolve."],
+    ["Project Management", "Organize QA work by workspace, project, module, and requirement."],
+    ["Test Case History", "Version every generated output with status, model, and author metadata."],
+    ["Review Workflow", "Submit, approve, reject, and lock official versions."],
+    ["Team Collaboration", "Invite members, assign roles, and manage project access."],
+    ["Analytics Dashboard", "Track coverage, productivity, review queues, exports, and AI usage."],
+    ["Jira Integration", "Coming soon for issue sync and traceability."],
+  ];
+  const screenshots = [
+    { title: "Dashboard", metric: "86%", caption: "Coverage and workflow KPIs" },
+    { title: "AI Chat", metric: "12", caption: "Context-aware QA suggestions" },
+    { title: "Project Management", metric: "48", caption: "Requirements and versions" },
+    { title: "Analytics", metric: "+31%", caption: "Team productivity insights" },
+  ];
+  const benefits = [
+    "80% Faster Test Design",
+    "Better Test Coverage",
+    "Faster Releases",
+    "Improved QA Productivity",
+    "Reduced Manual Effort",
+  ];
+  const faqs = [
+    ["What is AI QA Copilot?", "AI QA Copilot is an AI-powered QA platform for generating, managing, reviewing, and analyzing test assets from requirements."],
+    ["How does AI generate test cases?", "The platform analyzes requirement text, acceptance criteria, selected project context, and existing versions to produce structured QA scenarios."],
+    ["Is Jira supported?", "Jira integration is planned and marked as coming soon for issue traceability and workflow sync."],
+    ["Can teams collaborate?", "Yes. Team workspaces support roles, members, project assignments, review queues, and shared analytics."],
+    ["Is my data secure?", "The product is designed for enterprise controls, workspace-level access, role-based permissions, and governed approval flows."],
+  ];
+
+  return (
+    <div className="space-y-20 pb-10">
+      <section className="grid min-h-[calc(100vh-7rem)] items-center gap-10 lg:grid-cols-[1fr_.95fr]">
+        <div>
+          <Badge variant="outline" className="mb-5 border-primary/30 bg-primary/10 text-primary">
+            <Sparkles className="mr-1 size-3" /> Enterprise QA Intelligence
+          </Badge>
+          <h1 className="max-w-4xl font-display text-4xl font-bold leading-tight md:text-6xl">
+            AI-Powered Test Design & QA Management Platform
+          </h1>
+          <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">
+            Generate test cases, improve coverage, manage QA workflows, and accelerate software delivery with AI.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Button size="lg" className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onStart}>
+              <Rocket className="size-4" />
+              Start Free Trial
+            </Button>
+            <Button size="lg" variant="outline" onClick={onBookDemo}>
+              <CalendarDays className="size-4" />
+              Book Demo
+            </Button>
+          </div>
+          <div className="mt-8 grid gap-3 sm:grid-cols-2">
+            {heroFeatures.map(({ icon: Icon, label }) => (
+              <div key={label} className="flex items-center gap-3 rounded-lg border border-border/50 bg-card/60 p-3">
+                <span className="flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Icon className="size-4" />
+                </span>
+                <span className="text-sm font-medium">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <LandingProductMockup />
+      </section>
+
+      <section className="space-y-5">
+        <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Future-ready for customer logos
+        </p>
+        <div className="grid gap-3 md:grid-cols-4">
+          {["Enterprise Company 1", "Enterprise Company 2", "Enterprise Company 3", "Enterprise Company 4"].map((logo) => (
+            <div key={logo} className="rounded-lg border border-border/40 bg-card/50 p-5 text-center text-sm font-semibold text-muted-foreground">
+              {logo}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <LandingSection
+        eyebrow="The Problem"
+        title="QA Teams Waste Hours Creating and Managing Test Cases"
+        description="Manual QA design slows release cycles and leaves teams guessing where coverage, review, and documentation gaps are hiding."
+      >
+        <div className="grid gap-3 md:grid-cols-5">
+          {painPoints.map((point) => (
+            <div key={point} className="rounded-lg border border-border/40 bg-card/60 p-4">
+              <AlertTriangle className="mb-3 size-4 text-warning" />
+              <p className="text-sm font-medium">{point}</p>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="The Solution"
+        title="Meet AI QA Copilot"
+        description="A governed workflow that converts requirement text into review-ready test assets and management-friendly quality insight."
+      >
+        <div className="grid gap-3 md:grid-cols-5">
+          {["Requirement", "AI QA Copilot", "Generate Test Cases", "Review & Approval", "Export & Share"].map((step, index) => (
+            <div key={step} className="relative rounded-lg border border-border/40 bg-card/60 p-5 text-center">
+              <div className="mx-auto mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-sm font-semibold text-primary">
+                {index + 1}
+              </div>
+              <p className="text-sm font-semibold">{step}</p>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection eyebrow="Features" title="Everything QA Teams Need to Move Faster" description="From AI generation to approvals, exports, collaboration, and analytics.">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {features.map(([title, description], index) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
+              <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                {index === features.length - 1 ? <Rocket className="size-4" /> : <CheckCircle2 className="size-4" />}
+              </div>
+              <h3 className="text-sm font-semibold">{title}</h3>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection eyebrow="Product" title="Built for Real QA Workflows" description="Responsive product previews for every part of the QA lifecycle.">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {screenshots.map((item) => (
+            <div key={item.title} className="overflow-hidden rounded-lg border border-border/40 bg-card/60">
+              <div className="border-b border-border/40 bg-surface/50 p-3">
+                <p className="text-sm font-semibold">{item.title}</p>
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="rounded-lg border border-border/40 bg-background/50 p-4">
+                  <p className="font-display text-3xl font-semibold">{item.metric}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.caption}</p>
+                </div>
+                <div className="h-2 rounded-full bg-primary/20" />
+                <div className="h-2 w-3/4 rounded-full bg-success/30" />
+                <div className="h-2 w-1/2 rounded-full bg-warning/30" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection eyebrow="Benefits" title="Designed for Faster, Safer Releases" description="Make QA progress visible to engineers, QA leads, managers, and executives.">
+        <div className="grid gap-4 md:grid-cols-5">
+          {benefits.map((benefit) => (
+            <div key={benefit} className="rounded-lg border border-border/40 bg-card/60 p-5">
+              <TrendingUp className="mb-4 size-5 text-success" />
+              <p className="font-semibold">{benefit}</p>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection eyebrow="Pricing" title="Pricing Coming Soon" description="Start with the right plan for your QA maturity and scale into enterprise workflows.">
+        <div className="grid gap-4 md:grid-cols-3">
+          {["Free", "Pro", "Enterprise"].map((planName) => (
+            <div key={planName} className="rounded-lg border border-border/40 bg-card/60 p-6">
+              <h3 className="font-display text-xl font-semibold">{planName}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Pricing Coming Soon</p>
+              <Button className="mt-5 w-full" variant={planName === "Pro" ? "default" : "outline"} onClick={onStart}>
+                Join Waitlist
+              </Button>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection eyebrow="FAQ" title="Questions Teams Ask Before Adopting" description="Practical answers for QA leaders, managers, and engineering stakeholders.">
+        <div className="grid gap-3 lg:grid-cols-2">
+          {faqs.map(([question, answer]) => (
+            <div key={question} className="rounded-lg border border-border/40 bg-card/60 p-5">
+              <h3 className="font-semibold">{question}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{answer}</p>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <section className="rounded-lg border border-primary/30 bg-primary/10 p-8 text-center md:p-12">
+        <h2 className="font-display text-3xl font-bold md:text-4xl">Ready to Transform Your QA Process?</h2>
+        <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground">
+          Launch a governed AI QA workflow that teams can use for generation, review, analytics, and customer-ready reporting.
+        </p>
+        <div className="mt-7 flex justify-center gap-3">
+          <Button size="lg" className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onStart}>
+            Start Free Trial
+          </Button>
+          <Button size="lg" variant="outline" onClick={onBookDemo}>
+            Contact Sales
+          </Button>
+        </div>
+      </section>
+
+      <footer className="flex flex-col gap-5 border-t border-border/40 pt-8 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="font-display text-base font-semibold text-foreground">AI QA Copilot</p>
+          <p className="mt-1">AI-powered test design and QA management.</p>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          {["Product", "Features", "Pricing", "Documentation", "Contact", "LinkedIn", "GitHub"].map((link) => (
+            <button key={link} type="button" className="hover:text-foreground">
+              {link}
+            </button>
+          ))}
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function LandingSection({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-8 max-w-3xl">
+        <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+          {eyebrow}
+        </Badge>
+        <h2 className="font-display text-3xl font-bold md:text-4xl">{title}</h2>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground md:text-base">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function LandingProductMockup() {
+  return (
+    <div className="app-card overflow-hidden p-4">
+      <div className="flex items-center gap-2 border-b border-border/40 pb-3">
+        <span className="size-2.5 rounded-full bg-destructive" />
+        <span className="size-2.5 rounded-full bg-warning" />
+        <span className="size-2.5 rounded-full bg-success" />
+        <span className="ml-3 text-xs text-muted-foreground">AI QA Copilot workspace</span>
+      </div>
+      <div className="grid gap-4 p-4 lg:grid-cols-[.8fr_1.2fr]">
+        <div className="space-y-3">
+          {["Projects", "AI Chat", "Review Queue", "Analytics"].map((item, index) => (
+            <div key={item} className={cn("rounded-lg border p-3 text-sm", index === 0 ? "border-primary/40 bg-primary/10" : "border-border/40 bg-surface/40")}>
+              {item}
+            </div>
+          ))}
+        </div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            {["12,450", "86%", "31"].map((metric, index) => (
+              <div key={metric} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                <p className="font-display text-xl font-semibold">{metric}</p>
+                <p className="text-xs text-muted-foreground">{["Test Cases", "Coverage", "Reviews"][index]}</p>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-sm font-semibold">Coverage Trend</p>
+              <Badge variant="outline" className="border-success/40 bg-success/10 text-success">+15%</Badge>
+            </div>
+            <div className="flex h-32 items-end gap-2">
+              {[34, 50, 44, 68, 72, 86, 78, 92].map((height, index) => (
+                <div key={index} className="flex-1 rounded-t bg-primary/50" style={{ height: `${height}%` }} />
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+            <p className="text-sm font-semibold">Generated Test Plan</p>
+            <div className="mt-3 space-y-2">
+              <div className="h-2 rounded-full bg-success/50" />
+              <div className="h-2 w-4/5 rounded-full bg-primary/40" />
+              <div className="h-2 w-2/3 rounded-full bg-warning/40" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const CHART_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6"];
 
 function AnalyticsDashboardPage({
@@ -3148,12 +3722,12 @@ function TeamWorkspacePage({
 
 function WorkspaceTable({ headers, rows }: { headers: string[]; rows: Array<Array<ReactNode>> }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border/40">
+    <div className="max-h-[520px] overflow-auto rounded-lg border border-border/40">
       <table className="min-w-full divide-y divide-border/40 text-left text-sm">
-        <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+        <thead className="sticky top-0 z-10 bg-surface-elevated text-xs uppercase text-muted-foreground shadow-sm">
           <tr>
             {headers.map((header) => (
-              <th key={header} className="px-4 py-3 font-medium">
+              <th key={header} className="whitespace-nowrap px-4 py-3 font-medium">
                 {header}
               </th>
             ))}
@@ -3161,7 +3735,7 @@ function WorkspaceTable({ headers, rows }: { headers: string[]; rows: Array<Arra
         </thead>
         <tbody className="divide-y divide-border/30">
           {rows.map((row, index) => (
-            <tr key={index} className="bg-card/20">
+            <tr key={index} className="bg-card/20 transition-colors hover:bg-surface/50">
               {row.map((cell, cellIndex) => (
                 <td key={cellIndex} className="px-4 py-3 align-top">
                   {cell}
@@ -3661,9 +4235,18 @@ function AIChatPage({
                   ))
                 )}
                 {isLoading && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    AI is thinking...
+                  <div className="flex justify-start">
+                    <div className="rounded-lg border border-border/40 bg-surface/50 p-4">
+                      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        AI Copilot
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span className="size-2 animate-pulse rounded-full bg-primary" />
+                        <span className="size-2 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
+                        <span className="size-2 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
+                        <span className="ml-2">Analyzing selected requirement context...</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3719,9 +4302,17 @@ function ChatBubble({ message }: { message: { role: "user" | "assistant"; conten
             {isUser ? "You" : "AI Copilot"}
           </span>
           {!isUser && (
-            <Button variant="ghost" size="icon" onClick={copy}>
-              <Copy className="size-3.5" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" onClick={copy} aria-label="Copy response">
+                <Copy className="size-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => toast.success("Marked helpful")} aria-label="Like response">
+                <CheckCircle2 className="size-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => toast.message("Feedback noted")} aria-label="Dislike response">
+                <XCircle className="size-3.5" />
+              </Button>
+            </div>
           )}
         </div>
         <MarkdownLite content={message.content} />
@@ -3769,20 +4360,35 @@ function MarkdownLite({ content }: { content: string }) {
 }
 
 function Hero() {
+  const proofPoints = [
+    { label: "Coverage scoring", value: "Live" },
+    { label: "Review workflow", value: "Ready" },
+    { label: "Export reports", value: "PDF/XLSX" },
+  ];
   return (
-    <div id="generator" className="mx-auto max-w-3xl text-center">
-      <Badge variant="outline" className="mb-5 border-primary/30 bg-primary/10 text-primary">
-        <Sparkles className="mr-1 size-3" /> AI-powered QA workflow
-      </Badge>
-      <h1 className="font-display text-4xl font-bold leading-tight tracking-tight md:text-5xl lg:text-6xl">
-        Turn requirements into a <span className="text-gradient">complete test plan</span> in
-        seconds.
-      </h1>
-      <p className="mx-auto mt-5 max-w-2xl text-base text-muted-foreground md:text-lg">
-        Paste a user story or acceptance criteria. Get positive, negative & edge cases, test data
-        suggestions, and a runnable Playwright skeleton — instantly.
-      </p>
-    </div>
+    <Card id="generator" className="app-card p-6 md:p-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl">
+          <Badge variant="outline" className="mb-5 border-primary/30 bg-primary/10 text-primary">
+            <Sparkles className="mr-1 size-3" /> AI-powered QA workflow
+          </Badge>
+          <h1 className="font-display text-3xl font-bold leading-tight md:text-5xl">
+            Turn requirements into governed, export-ready QA assets.
+          </h1>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
+            Generate test cases, acceptance criteria, test data, coverage insight, Playwright skeletons, and review-ready versions in one workspace.
+          </p>
+        </div>
+        <div className="grid min-w-[280px] gap-3 sm:grid-cols-3 lg:grid-cols-1">
+          {proofPoints.map((item) => (
+            <div key={item.label} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+              <p className="text-xs text-muted-foreground">{item.label}</p>
+              <p className="mt-1 font-display text-lg font-semibold">{item.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -3829,23 +4435,34 @@ function FeatureGrid() {
 
 function EmptyState() {
   return (
-    <Card className="border-dashed border-border/50 bg-card/30 p-10 text-center backdrop-blur">
-      <Beaker className="mx-auto size-8 text-muted-foreground" />
-      <p className="mt-3 text-sm text-muted-foreground">
-        Your generated test plan will appear here.
-      </p>
+    <Card className="app-card p-10">
+      <ProfessionalEmptyState
+        icon={Beaker}
+        title="No test plan generated yet"
+        message="Select a project and module, enter a requirement, and generate a structured QA pack ready for review and export."
+        actionLabel="Start with Generate & Save Test Cases"
+      />
     </Card>
   );
 }
 
 function ResultSkeleton() {
   return (
-    <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
-      <Skeleton className="h-6 w-48" />
-      <div className="mt-4 grid gap-3">
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-20 w-full" />
+    <Card className="app-card p-6">
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Loader2 className="size-5 animate-spin" />
+        </div>
+        <div>
+          <p className="font-semibold">AI is building your QA pack</p>
+          <p className="text-sm text-muted-foreground">Analyzing requirement, scenarios, risks, and coverage.</p>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3">
+        <Skeleton className="h-3 w-full shimmer" />
+        <Skeleton className="h-3 w-4/5 shimmer" />
+        <Skeleton className="h-24 w-full shimmer" />
+        <Skeleton className="h-24 w-full shimmer" />
       </div>
     </Card>
   );

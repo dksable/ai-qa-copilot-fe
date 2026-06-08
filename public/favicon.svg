@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI QA Copilot">
+  <rect width="64" height="64" rx="14" fill="#101828"/>
+  <path d="M18 20h28v20H18z" fill="#38bdf8" opacity=".16"/>
+  <path d="M22 24h20M22 31h13M22 38h18" stroke="#7dd3fc" stroke-width="4" stroke-linecap="round"/>
+  <path d="M46 42l6 6M45 51l7-7 4 4-7 7z" stroke="#22c55e" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="45" cy="19" r="5" fill="#22c55e"/>
+</svg>
