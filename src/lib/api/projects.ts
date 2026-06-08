@@ -16,6 +16,9 @@ export type WorkspaceRole = "Owner" | "Admin" | "QA Lead" | "QA Engineer" | "Vie
 export type ProjectPermissionLevel = "Full Access" | "Edit Access" | "Review Access" | "View Only";
 export type MemberStatus = "Active" | "Inactive" | "Removed";
 export type InviteStatus = "Pending" | "Accepted" | "Expired" | "Revoked";
+export type PlanId = "free" | "pro" | "enterprise";
+export type BillingCycle = "monthly" | "yearly";
+export type SubscriptionStatus = "Trialing" | "Active" | "Canceled" | "Past Due";
 export type ReviewAction =
   | "Submitted for Review"
   | "Approved"
@@ -134,6 +137,49 @@ export interface AuthContextResponse {
 export interface AuthResponse extends AuthContextResponse {
   accessToken: string;
   expiresAt: string;
+}
+
+export interface Plan {
+  id: PlanId;
+  name: string;
+  description: string;
+  monthlyPrice: number | null;
+  yearlyPrice: number | null;
+  recommended?: boolean;
+  trialDays?: number;
+  features: string[];
+  limits: {
+    workspaces: number | "unlimited";
+    teamMembers: number | "unlimited";
+    projects: number | "unlimited";
+    requirementsPerMonth: number | "unlimited";
+    aiGenerationsPerMonth: number | "unlimited";
+    aiChatMessagesPerMonth: number | "unlimited";
+    exports: string;
+    analytics: boolean;
+    reviewWorkflow: boolean;
+    jiraIntegration: boolean;
+    prioritySupport: boolean;
+    customLimits: boolean;
+  };
+}
+
+export interface Subscription {
+  id: string;
+  workspaceId: string;
+  planId: PlanId;
+  billingCycle: BillingCycle;
+  status: SubscriptionStatus;
+  trialEndsAt?: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubscriptionResponse {
+  subscription: Subscription;
+  plan: Plan;
 }
 
 export interface ProjectModule {
@@ -563,6 +609,14 @@ export const projectApi = {
     apiRequest<AuthContextResponse>("/api/auth/profile", { method: "PATCH", body: JSON.stringify(input) }),
   changePassword: (input: { currentPassword: string; newPassword: string }) =>
     apiRequest<{ message: string }>("/api/auth/change-password", { method: "PATCH", body: JSON.stringify(input) }),
+  listPlans: () => apiRequest<Plan[]>("/api/plans"),
+  getCurrentSubscription: (workspaceId: string) =>
+    apiRequest<SubscriptionResponse>(`/api/subscription/current?workspaceId=${encodeURIComponent(workspaceId)}`),
+  updateSubscription: (input: { workspaceId: string; planId: PlanId; billingCycle?: BillingCycle }) =>
+    apiRequest<SubscriptionResponse>("/api/subscription/current", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
   getDashboard: () => apiRequest<DashboardStats>("/api/dashboard"),
   listProjects: () => apiRequest<ProjectSummary[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>

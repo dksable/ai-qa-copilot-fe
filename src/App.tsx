@@ -44,7 +44,6 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
-  Command,
   UserCircle,
   ChevronDown,
 } from "lucide-react";
@@ -113,6 +112,7 @@ import {
   type AnalyticsUserProductivity,
   type AuthContextResponse,
   type AuthResponse,
+  type BillingCycle,
   type CreateProjectInput,
   type DashboardStats,
   type EntityStatus,
@@ -131,6 +131,9 @@ import {
   type WorkspaceDetail,
   type WorkspaceMember,
   type WorkspaceRole,
+  type Plan,
+  type PlanId,
+  type SubscriptionResponse,
   type TestCaseHistoryCompare,
   type TestCaseHistoryRecord,
   type TestCaseGenerationHistory,
@@ -155,6 +158,7 @@ type ActiveView =
   | "forgot-password"
   | "reset-password"
   | "profile"
+  | "pricing"
   | "generator"
   | "projects"
   | "history"
@@ -232,6 +236,10 @@ export default function App() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [auth, setAuth] = useState<AuthContextResponse | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(() => Boolean(localStorage.getItem("aiqa_access_token")));
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
+  const [isPricingLoading, setIsPricingLoading] = useState(false);
   const isAuthenticated = Boolean(auth?.user);
 
   useEffect(() => {
@@ -383,6 +391,24 @@ export default function App() {
     void refreshReviewQueue();
     void refreshWorkspace("");
     void refreshAnalytics({});
+    void refreshPricing();
+  };
+
+  const refreshPricing = async (workspaceId = auth?.workspace?.id) => {
+    try {
+      setIsPricingLoading(true);
+      const planList = await projectApi.listPlans();
+      setPlans(planList);
+      if (workspaceId) {
+        const current = await projectApi.getCurrentSubscription(workspaceId);
+        setSubscription(current);
+        setBillingCycle(current.subscription.billingCycle);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load pricing");
+    } finally {
+      setIsPricingLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -503,6 +529,7 @@ export default function App() {
           <LandingPage
             onStart={() => setActiveView(isAuthenticated ? "generator" : "signup")}
             onBookDemo={() => toast.success("Demo request captured. Sales will follow up shortly.")}
+            onPricing={() => setActiveView(isAuthenticated ? "pricing" : "signup")}
           />
         ) : activeView === "login" ? (
           <AuthPage
@@ -541,6 +568,28 @@ export default function App() {
           />
         ) : activeView === "profile" ? (
           <ProfilePage auth={auth} onAuthChange={setAuth} />
+        ) : activeView === "pricing" ? (
+          <PricingPage
+            plans={plans}
+            subscription={subscription}
+            billingCycle={billingCycle}
+            isLoading={isPricingLoading}
+            workspaceId={auth?.workspace?.id ?? ""}
+            onBillingCycleChange={setBillingCycle}
+            onPlanChange={async (planId) => {
+              if (!auth?.workspace?.id) {
+                toast.error("Workspace is required to change plans.");
+                return;
+              }
+              const updated = await projectApi.updateSubscription({
+                workspaceId: auth.workspace.id,
+                planId,
+                billingCycle,
+              });
+              setSubscription(updated);
+              toast.success(`Plan updated to ${updated.plan.name}`);
+            }}
+          />
         ) : activeView === "generator" ? (
           <>
             <Hero />
@@ -901,6 +950,7 @@ function Nav({
     { label: "AI Chat", value: "chat", icon: Bot, description: "Requirement assistant" },
     { label: "Team Workspace", value: "workspace", icon: Users, description: "Members and roles" },
     { label: "Analytics", value: "analytics", icon: BarChart3, description: "Coverage and productivity" },
+    { label: "Pricing", value: "pricing", icon: Rocket, description: "Plans and billing" },
     { label: "Profile", value: "profile", icon: UserCircle, description: "Account settings" },
   ];
 
@@ -1070,18 +1120,9 @@ function Nav({
             <Menu className="size-4" />
           </Button>
 
-          <div className="hidden min-w-0 flex-1 items-center gap-2 rounded-lg border border-border/50 bg-surface/50 px-3 py-2 text-sm text-muted-foreground shadow-sm md:flex">
-            <Search className="size-4" />
-            <span className="truncate">Search projects, requirements, histories...</span>
-            <kbd className="ml-auto rounded border border-border/60 bg-background/70 px-1.5 py-0.5 text-[10px]">
-              <Command className="inline size-3" /> K
-            </kbd>
-          </div>
+          <div className="hidden min-w-0 flex-1 md:block" />
 
           <div className="ml-auto flex items-center gap-2">
-            <Badge variant="outline" className="hidden border-primary/40 bg-primary/10 text-primary sm:flex">
-              Demo ready
-            </Badge>
             <Button type="button" variant="outline" size="icon" className="size-9" aria-label="Notifications">
               <Bell className="size-4" />
             </Button>
@@ -1096,20 +1137,26 @@ function Nav({
             >
               {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </Button>
-            <Button type="button" variant="outline" className="hidden h-9 gap-2 px-2 sm:flex">
-              <UserCircle className="size-4" />
-              <span className="text-sm">{auth?.user.fullName?.split(" ")[0] ?? "Login"}</span>
-              <ChevronDown className="size-3.5 text-muted-foreground" />
-            </Button>
             {auth ? (
-              <>
-                <Button type="button" variant="outline" className="hidden h-9 sm:flex" onClick={onProfile}>
-                  Profile
-                </Button>
-                <Button type="button" variant="outline" className="hidden h-9 sm:flex" onClick={onLogout}>
-                  Logout
-                </Button>
-              </>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" className="h-9 gap-2 px-3">
+                    <UserCircle className="size-4" />
+                    <span className="text-sm">{auth.user.fullName?.split(" ")[0] ?? "User"}</span>
+                    <ChevronDown className="size-3.5 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={onProfile}>
+                    <UserCircle className="size-4" />
+                    Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onLogout}>
+                    <XCircle className="size-4" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               <Button type="button" className="h-9 bg-gradient-primary text-primary-foreground" onClick={onLogin}>
                 Login
@@ -2943,7 +2990,15 @@ function ProfilePage({
   );
 }
 
-function LandingPage({ onStart, onBookDemo }: { onStart: () => void; onBookDemo: () => void }) {
+function LandingPage({
+  onStart,
+  onBookDemo,
+  onPricing,
+}: {
+  onStart: () => void;
+  onBookDemo: () => void;
+  onPricing: () => void;
+}) {
   const heroFeatures = [
     { icon: Wand2, label: "AI Test Case Generation" },
     { icon: Bot, label: "AI Chat with Requirement" },
@@ -3124,7 +3179,7 @@ function LandingPage({ onStart, onBookDemo }: { onStart: () => void; onBookDemo:
             <div key={planName} className="rounded-lg border border-border/40 bg-card/60 p-6">
               <h3 className="font-display text-xl font-semibold">{planName}</h3>
               <p className="mt-2 text-sm text-muted-foreground">Pricing Coming Soon</p>
-              <Button className="mt-5 w-full" variant={planName === "Pro" ? "default" : "outline"} onClick={onStart}>
+              <Button className="mt-5 w-full" variant={planName === "Pro" ? "default" : "outline"} onClick={onPricing}>
                 Join Waitlist
               </Button>
             </div>
@@ -3252,6 +3307,171 @@ function LandingProductMockup() {
 }
 
 const CHART_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6"];
+
+function PricingPage({
+  plans,
+  subscription,
+  billingCycle,
+  isLoading,
+  workspaceId,
+  onBillingCycleChange,
+  onPlanChange,
+}: {
+  plans: Plan[];
+  subscription: SubscriptionResponse | null;
+  billingCycle: BillingCycle;
+  isLoading: boolean;
+  workspaceId: string;
+  onBillingCycleChange: (cycle: BillingCycle) => void;
+  onPlanChange: (planId: PlanId) => void;
+}) {
+  const comparisonRows: Array<[string, keyof Plan["limits"]]> = [
+    ["Workspaces", "workspaces"],
+    ["Team Members", "teamMembers"],
+    ["Projects", "projects"],
+    ["Requirements / Month", "requirementsPerMonth"],
+    ["AI Generations / Month", "aiGenerationsPerMonth"],
+    ["AI Chat Messages / Month", "aiChatMessagesPerMonth"],
+    ["Exports", "exports"],
+    ["Analytics Dashboard", "analytics"],
+    ["Review Workflow", "reviewWorkflow"],
+    ["Jira Integration", "jiraIntegration"],
+    ["Priority Support", "prioritySupport"],
+  ];
+  const currentPlanId = subscription?.subscription.planId;
+  const priceFor = (plan: Plan) => {
+    const price = billingCycle === "monthly" ? plan.monthlyPrice : plan.yearlyPrice;
+    if (price === null) return "Custom";
+    if (price === 0) return "$0";
+    return `$${price}`;
+  };
+  const limitText = (value: unknown) => {
+    if (value === true) return "Included";
+    if (value === false) return "Not included";
+    if (value === "unlimited") return "Unlimited";
+    return String(value);
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            SaaS Plans
+          </Badge>
+          <h1 className="font-display text-3xl font-bold md:text-4xl">Pricing Plans</h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Choose the plan that matches your QA team size, AI usage, exports, analytics, and governance needs.
+          </p>
+        </div>
+        <div className="flex rounded-lg border border-border/50 bg-card/60 p-1">
+          {(["monthly", "yearly"] as BillingCycle[]).map((cycle) => (
+            <Button
+              key={cycle}
+              size="sm"
+              variant={billingCycle === cycle ? "secondary" : "ghost"}
+              onClick={() => onBillingCycleChange(cycle)}
+            >
+              {cycle === "monthly" ? "Monthly" : "Yearly"}
+              {cycle === "yearly" && <Badge variant="outline" className="ml-2 border-success/40 bg-success/10 text-success">Save 20%</Badge>}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading && !plans.length ? (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Skeleton className="h-96 shimmer" />
+          <Skeleton className="h-96 shimmer" />
+          <Skeleton className="h-96 shimmer" />
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {plans.map((plan) => {
+            const isCurrent = currentPlanId === plan.id;
+            return (
+              <Card key={plan.id} className={cn("app-card relative p-6", plan.recommended && "border-primary/50")}>
+                {plan.recommended && (
+                  <Badge className="absolute right-4 top-4 bg-gradient-primary text-primary-foreground">
+                    Recommended
+                  </Badge>
+                )}
+                {isCurrent && (
+                  <Badge variant="outline" className="mb-3 border-success/40 bg-success/10 text-success">
+                    Current Plan
+                  </Badge>
+                )}
+                <h2 className="font-display text-2xl font-semibold">{plan.name}</h2>
+                <p className="mt-2 min-h-12 text-sm text-muted-foreground">{plan.description}</p>
+                <div className="mt-6">
+                  <span className="font-display text-4xl font-bold">{priceFor(plan)}</span>
+                  {plan.monthlyPrice !== null && <span className="ml-2 text-sm text-muted-foreground">/{billingCycle === "monthly" ? "mo" : "yr"}</span>}
+                </div>
+                {plan.trialDays && (
+                  <p className="mt-2 text-sm text-primary">{plan.trialDays}-Day Trial</p>
+                )}
+                <Button
+                  className={cn("mt-6 w-full", plan.recommended && "bg-gradient-primary text-primary-foreground shadow-glow")}
+                  variant={plan.recommended ? "default" : "outline"}
+                  disabled={isCurrent || !workspaceId}
+                  onClick={() => onPlanChange(plan.id)}
+                >
+                  {isCurrent ? "Current Plan" : currentPlanId ? (plan.id === "enterprise" ? "Contact Sales" : "Switch Plan") : "Choose Plan"}
+                </Button>
+                <div className="mt-6 space-y-3">
+                  {plan.features.map((feature) => (
+                    <div key={feature} className="flex gap-2 text-sm">
+                      <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                      <span>{feature}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Card className="app-card p-6">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-xl font-semibold">Feature Comparison</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Compare plan limits and SaaS capabilities.</p>
+          </div>
+          {subscription && (
+            <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
+              Current: {subscription.plan.name} ({subscription.subscription.status})
+            </Badge>
+          )}
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-border/40">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-surface-elevated text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Feature</th>
+                {plans.map((plan) => (
+                  <th key={plan.id} className="px-4 py-3">{plan.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/30">
+              {comparisonRows.map(([label, key]) => (
+                <tr key={label} className="hover:bg-surface/40">
+                  <td className="px-4 py-3 font-medium">{label}</td>
+                  {plans.map((plan) => (
+                    <td key={plan.id} className="px-4 py-3 text-muted-foreground">
+                      {limitText(plan.limits[key])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
 
 function AnalyticsDashboardPage({
   analytics,
