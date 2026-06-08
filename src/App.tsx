@@ -111,6 +111,8 @@ import {
   type AnalyticsReview,
   type AnalyticsSummary,
   type AnalyticsUserProductivity,
+  type AuthContextResponse,
+  type AuthResponse,
   type CreateProjectInput,
   type DashboardStats,
   type EntityStatus,
@@ -146,7 +148,20 @@ import type {
 } from "@/lib/api/coverageScore";
 
 type Theme = "light" | "dark";
-type ActiveView = "landing" | "generator" | "projects" | "history" | "review" | "chat" | "workspace" | "analytics";
+type ActiveView =
+  | "landing"
+  | "login"
+  | "signup"
+  | "forgot-password"
+  | "reset-password"
+  | "profile"
+  | "generator"
+  | "projects"
+  | "history"
+  | "review"
+  | "chat"
+  | "workspace"
+  | "analytics";
 
 interface AnalyticsBundle {
   summary: AnalyticsSummary;
@@ -215,6 +230,9 @@ export default function App() {
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [auth, setAuth] = useState<AuthContextResponse | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(() => Boolean(localStorage.getItem("aiqa_access_token")));
+  const isAuthenticated = Boolean(auth?.user);
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -345,7 +363,19 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
+  const applyAuth = (response: AuthResponse | AuthContextResponse) => {
+    if ("accessToken" in response) localStorage.setItem("aiqa_access_token", response.accessToken);
+    setAuth({
+      user: response.user,
+      workspace: response.workspace,
+      member: response.member,
+      role: response.role,
+      permissions: response.permissions,
+    });
+    setActiveView("generator");
+  };
+
+  const loadProductData = () => {
     void refreshProjects("");
     void refreshHistory({});
     void refreshExportHistory();
@@ -353,7 +383,27 @@ export default function App() {
     void refreshReviewQueue();
     void refreshWorkspace("");
     void refreshAnalytics({});
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem("aiqa_access_token");
+    if (!token) return;
+    projectApi
+      .me()
+      .then((context) => {
+        setAuth(context);
+        loadProductData();
+      })
+      .catch(() => {
+        localStorage.removeItem("aiqa_access_token");
+        setAuth(null);
+      })
+      .finally(() => setIsAuthLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) loadProductData();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -426,6 +476,20 @@ export default function App() {
         onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
         isMobileOpen={isMobileNavOpen}
         onMobileOpenChange={setIsMobileNavOpen}
+        auth={auth}
+        onLogin={() => setActiveView("login")}
+        onProfile={() => setActiveView("profile")}
+        onLogout={async () => {
+          try {
+            await projectApi.logout();
+          } catch {
+            // Token may already be expired; local cleanup is enough.
+          }
+          localStorage.removeItem("aiqa_access_token");
+          setAuth(null);
+          setActiveView("landing");
+          toast.success("Logged out");
+        }}
       />
 
       <main
@@ -437,9 +501,46 @@ export default function App() {
         <div className="mx-auto max-w-[1480px]">
         {activeView === "landing" ? (
           <LandingPage
-            onStart={() => setActiveView("generator")}
+            onStart={() => setActiveView(isAuthenticated ? "generator" : "signup")}
             onBookDemo={() => toast.success("Demo request captured. Sales will follow up shortly.")}
           />
+        ) : activeView === "login" ? (
+          <AuthPage
+            mode="login"
+            isLoading={isAuthLoading}
+            onModeChange={setActiveView}
+            onAuthenticated={applyAuth}
+          />
+        ) : activeView === "signup" ? (
+          <AuthPage
+            mode="signup"
+            isLoading={isAuthLoading}
+            onModeChange={setActiveView}
+            onAuthenticated={applyAuth}
+          />
+        ) : activeView === "forgot-password" ? (
+          <AuthPage
+            mode="forgot-password"
+            isLoading={isAuthLoading}
+            onModeChange={setActiveView}
+            onAuthenticated={applyAuth}
+          />
+        ) : activeView === "reset-password" ? (
+          <AuthPage
+            mode="reset-password"
+            isLoading={isAuthLoading}
+            onModeChange={setActiveView}
+            onAuthenticated={applyAuth}
+          />
+        ) : !isAuthenticated ? (
+          <AuthPage
+            mode="login"
+            isLoading={isAuthLoading}
+            onModeChange={setActiveView}
+            onAuthenticated={applyAuth}
+          />
+        ) : activeView === "profile" ? (
+          <ProfilePage auth={auth} onAuthChange={setAuth} />
         ) : activeView === "generator" ? (
           <>
             <Hero />
@@ -763,6 +864,10 @@ function Nav({
   onToggleCollapsed,
   isMobileOpen,
   onMobileOpenChange,
+  auth,
+  onLogin,
+  onProfile,
+  onLogout,
 }: {
   theme: Theme;
   activeView: ActiveView;
@@ -775,6 +880,10 @@ function Nav({
   onToggleCollapsed: () => void;
   isMobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void;
+  auth: AuthContextResponse | null;
+  onLogin: () => void;
+  onProfile: () => void;
+  onLogout: () => void;
 }) {
   const isDark = theme === "dark";
   const activeWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
@@ -792,6 +901,7 @@ function Nav({
     { label: "AI Chat", value: "chat", icon: Bot, description: "Requirement assistant" },
     { label: "Team Workspace", value: "workspace", icon: Users, description: "Members and roles" },
     { label: "Analytics", value: "analytics", icon: BarChart3, description: "Coverage and productivity" },
+    { label: "Profile", value: "profile", icon: UserCircle, description: "Account settings" },
   ];
 
   const navigate = (view: ActiveView) => {
@@ -893,8 +1003,8 @@ function Nav({
             </div>
             {!isCollapsed && (
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">Durgesh Sable</p>
-                <p className="truncate text-xs text-muted-foreground">Owner workspace</p>
+                <p className="truncate text-sm font-medium">{auth?.user.fullName ?? "Guest"}</p>
+                <p className="truncate text-xs text-muted-foreground">{auth?.role ?? "Public visitor"}</p>
               </div>
             )}
           </div>
@@ -988,9 +1098,23 @@ function Nav({
             </Button>
             <Button type="button" variant="outline" className="hidden h-9 gap-2 px-2 sm:flex">
               <UserCircle className="size-4" />
-              <span className="text-sm">Durgesh</span>
+              <span className="text-sm">{auth?.user.fullName?.split(" ")[0] ?? "Login"}</span>
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
+            {auth ? (
+              <>
+                <Button type="button" variant="outline" className="hidden h-9 sm:flex" onClick={onProfile}>
+                  Profile
+                </Button>
+                <Button type="button" variant="outline" className="hidden h-9 sm:flex" onClick={onLogout}>
+                  Logout
+                </Button>
+              </>
+            ) : (
+              <Button type="button" className="h-9 bg-gradient-primary text-primary-foreground" onClick={onLogin}>
+                Login
+              </Button>
+            )}
           </div>
         </div>
       </header>
@@ -2580,6 +2704,240 @@ function CompareList({
         </ul>
       ) : (
         <p className="mt-2 text-xs text-muted-foreground">No changes detected.</p>
+      )}
+    </div>
+  );
+}
+
+function AuthPage({
+  mode,
+  isLoading,
+  onModeChange,
+  onAuthenticated,
+}: {
+  mode: "login" | "signup" | "forgot-password" | "reset-password";
+  isLoading: boolean;
+  onModeChange: (view: ActiveView) => void;
+  onAuthenticated: (response: AuthResponse) => void;
+}) {
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    workspaceName: "",
+    token: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resetLink, setResetLink] = useState("");
+  const title =
+    mode === "signup"
+      ? "Create your AI QA Copilot account"
+      : mode === "forgot-password"
+        ? "Reset your password"
+        : mode === "reset-password"
+          ? "Create a new password"
+          : "Welcome back";
+
+  const passwordType = showPassword ? "text" : "password";
+  const submit = async () => {
+    try {
+      setIsSubmitting(true);
+      if (mode === "signup") {
+        if (form.password !== form.confirmPassword) throw new Error("Passwords do not match.");
+        const response = await projectApi.signup({
+          fullName: form.fullName,
+          email: form.email,
+          password: form.password,
+          confirmPassword: form.confirmPassword,
+          workspaceName: form.workspaceName,
+        });
+        toast.success("Account created");
+        onAuthenticated(response);
+      } else if (mode === "login") {
+        const response = await projectApi.login({ email: form.email, password: form.password });
+        toast.success("Logged in successfully");
+        onAuthenticated(response);
+      } else if (mode === "forgot-password") {
+        const response = await projectApi.forgotPassword(form.email);
+        setResetLink(response.resetLink ?? "");
+        toast.success("Reset instructions prepared");
+      } else {
+        await projectApi.resetPassword({
+          token: form.token,
+          password: form.password,
+          confirmPassword: form.confirmPassword,
+        });
+        toast.success("Password reset. Please login.");
+        onModeChange("login");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Authentication failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const googleLogin = async () => {
+    try {
+      setIsSubmitting(true);
+      const email = form.email || window.prompt("Google email for demo login") || "";
+      const fullName = form.fullName || email.split("@")[0] || "Google User";
+      if (!email) return;
+      const response = await projectApi.googleLogin({
+        email,
+        fullName,
+        googleId: `google-${email}`,
+      });
+      toast.success("Logged in with Google");
+      onAuthenticated(response);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Google login failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto grid min-h-[calc(100vh-8rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1fr_460px]">
+      <div className="hidden lg:block">
+        <Badge variant="outline" className="mb-5 border-primary/30 bg-primary/10 text-primary">
+          Secure team workspace
+        </Badge>
+        <h1 className="font-display text-5xl font-bold leading-tight">Govern AI-generated QA work with roles, review, and analytics.</h1>
+        <p className="mt-5 max-w-xl text-muted-foreground">
+          Sign in to manage projects, invite team members, approve test case versions, and export official QA reports.
+        </p>
+      </div>
+      <Card className="app-card p-6">
+        <div className="mb-6">
+          <h2 className="font-display text-2xl font-semibold">{title}</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {mode === "signup" ? "Start with a default owner workspace." : "Use email/password or Google demo login."}
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {mode === "signup" && (
+            <>
+              <Input placeholder="Full name" value={form.fullName} onChange={(event) => setForm((value) => ({ ...value, fullName: event.target.value }))} />
+              <Input placeholder="Company / Workspace name" value={form.workspaceName} onChange={(event) => setForm((value) => ({ ...value, workspaceName: event.target.value }))} />
+            </>
+          )}
+          {(mode === "login" || mode === "signup" || mode === "forgot-password") && (
+            <Input placeholder="Work email" type="email" value={form.email} onChange={(event) => setForm((value) => ({ ...value, email: event.target.value }))} />
+          )}
+          {mode === "reset-password" && (
+            <Input placeholder="Reset token" value={form.token} onChange={(event) => setForm((value) => ({ ...value, token: event.target.value }))} />
+          )}
+          {(mode === "login" || mode === "signup" || mode === "reset-password") && (
+            <div className="flex gap-2">
+              <Input
+                placeholder={mode === "reset-password" ? "New password" : "Password"}
+                type={passwordType}
+                value={form.password}
+                onChange={(event) => setForm((value) => ({ ...value, password: event.target.value }))}
+              />
+              <Button type="button" variant="outline" onClick={() => setShowPassword((value) => !value)}>
+                {showPassword ? "Hide" : "Show"}
+              </Button>
+            </div>
+          )}
+          {(mode === "signup" || mode === "reset-password") && (
+            <Input
+              placeholder="Confirm password"
+              type={passwordType}
+              value={form.confirmPassword}
+              onChange={(event) => setForm((value) => ({ ...value, confirmPassword: event.target.value }))}
+            />
+          )}
+          <Button className="w-full bg-gradient-primary text-primary-foreground" onClick={submit} disabled={isSubmitting || isLoading}>
+            {(isSubmitting || isLoading) && <Loader2 className="size-4 animate-spin" />}
+            {mode === "signup" ? "Create Account" : mode === "forgot-password" ? "Send Reset Link" : mode === "reset-password" ? "Reset Password" : "Login"}
+          </Button>
+          {(mode === "login" || mode === "signup") && (
+            <Button className="w-full" variant="outline" onClick={googleLogin} disabled={isSubmitting}>
+              <UserCircle className="size-4" />
+              Continue with Google
+            </Button>
+          )}
+          {resetLink && (
+            <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-sm">
+              Demo reset link: <span className="font-mono">{resetLink}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-muted-foreground">
+          {mode !== "login" && <button onClick={() => onModeChange("login")} className="hover:text-foreground">Back to login</button>}
+          {mode !== "signup" && <button onClick={() => onModeChange("signup")} className="hover:text-foreground">Create account</button>}
+          {mode !== "forgot-password" && <button onClick={() => onModeChange("forgot-password")} className="hover:text-foreground">Forgot password?</button>}
+          {mode !== "reset-password" && <button onClick={() => onModeChange("reset-password")} className="hover:text-foreground">Have reset token?</button>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ProfilePage({
+  auth,
+  onAuthChange,
+}: {
+  auth: AuthContextResponse | null;
+  onAuthChange: (auth: AuthContextResponse | null) => void;
+}) {
+  const [fullName, setFullName] = useState(auth?.user.fullName ?? "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  if (!auth) return null;
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <div>
+        <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">Account Settings</Badge>
+        <h1 className="font-display text-3xl font-bold">Profile</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Manage account identity, workspace role, and password settings.</p>
+      </div>
+      <Card className="app-card p-6">
+        <div className="grid gap-4">
+          <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Full name" />
+          <Input value={auth.user.email} readOnly />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniStat label="Role" value={auth.role} />
+            <MiniStat label="Workspace" value={auth.workspace?.workspaceName ?? "No workspace"} />
+          </div>
+          <Button
+            onClick={async () => {
+              const updated = await projectApi.updateProfile({ fullName });
+              onAuthChange(updated);
+              toast.success("Profile updated");
+            }}
+          >
+            Save Profile
+          </Button>
+        </div>
+      </Card>
+      {auth.user.authProvider === "email" && (
+        <Card className="app-card p-6">
+          <h2 className="mb-4 font-semibold">Change Password</h2>
+          <div className="grid gap-3">
+            <Input type="password" placeholder="Current password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+            <Input type="password" placeholder="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+            <Button
+              variant="outline"
+              onClick={async () => {
+                await projectApi.changePassword({ currentPassword, newPassword });
+                setCurrentPassword("");
+                setNewPassword("");
+                toast.success("Password changed");
+              }}
+            >
+              Change Password
+            </Button>
+          </div>
+        </Card>
       )}
     </div>
   );

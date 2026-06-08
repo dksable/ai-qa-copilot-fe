@@ -23,6 +23,8 @@ export type ReviewAction =
   | "Rejected"
   | "Comment Added"
   | "Exported Approved Version";
+export type AuthProvider = "email" | "google";
+export type UserStatus = "Active" | "Inactive" | "Suspended";
 
 export interface ProjectSummary {
   id: string;
@@ -103,6 +105,35 @@ export interface WorkspaceDetail {
   members: WorkspaceMember[];
   invites: WorkspaceInvite[];
   activityLogs: ActivityLog[];
+}
+
+export interface AuthUser {
+  id: string;
+  fullName: string;
+  name: string;
+  email: string;
+  googleId?: string;
+  avatar?: string;
+  authProvider: AuthProvider;
+  role: WorkspaceRole;
+  status: UserStatus;
+  emailVerified: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuthContextResponse {
+  user: AuthUser;
+  workspace: Workspace | null;
+  member: WorkspaceMember | null;
+  role: WorkspaceRole;
+  permissions: string[];
+}
+
+export interface AuthResponse extends AuthContextResponse {
+  accessToken: string;
+  expiresAt: string;
 }
 
 export interface ProjectModule {
@@ -440,16 +471,19 @@ const apiBaseUrl = () => import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VI
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const baseUrl = apiBaseUrl();
   if (!baseUrl) throw new Error("API URL is not configured.");
+  const token = localStorage.getItem("aiqa_access_token");
 
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   });
 
   if (!response.ok) {
+    if (response.status === 401) localStorage.removeItem("aiqa_access_token");
     const errorBody = await response.json().catch(() => null);
     throw new Error(errorBody?.message ?? "Request failed.");
   }
@@ -510,6 +544,25 @@ async function downloadBlob(path: string, body: unknown, fallbackName: string) {
 }
 
 export const projectApi = {
+  signup: (input: { fullName: string; email: string; password: string; confirmPassword: string; workspaceName?: string }) =>
+    apiRequest<AuthResponse>("/api/auth/signup", { method: "POST", body: JSON.stringify(input) }),
+  login: (input: { email: string; password: string }) =>
+    apiRequest<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(input) }),
+  googleLogin: (input: { email: string; fullName: string; googleId?: string; avatar?: string; credential?: string }) =>
+    apiRequest<AuthResponse>("/api/auth/google", { method: "POST", body: JSON.stringify(input) }),
+  logout: () => apiRequest<void>("/api/auth/logout", { method: "POST" }),
+  me: () => apiRequest<AuthContextResponse>("/api/auth/me"),
+  forgotPassword: (email: string) =>
+    apiRequest<{ message: string; resetLink?: string; resetToken?: string }>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  resetPassword: (input: { token: string; password: string; confirmPassword: string }) =>
+    apiRequest<{ message: string }>("/api/auth/reset-password", { method: "POST", body: JSON.stringify(input) }),
+  updateProfile: (input: { fullName?: string; avatar?: string }) =>
+    apiRequest<AuthContextResponse>("/api/auth/profile", { method: "PATCH", body: JSON.stringify(input) }),
+  changePassword: (input: { currentPassword: string; newPassword: string }) =>
+    apiRequest<{ message: string }>("/api/auth/change-password", { method: "PATCH", body: JSON.stringify(input) }),
   getDashboard: () => apiRequest<DashboardStats>("/api/dashboard"),
   listProjects: () => apiRequest<ProjectSummary[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
