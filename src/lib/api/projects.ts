@@ -3,9 +3,26 @@ import type { TestFocus, TestPlan } from "@/lib/api/testcases";
 export type ProjectDomain = "Banking" | "Healthcare" | "E-commerce" | "SaaS" | "Education" | "Custom";
 export type EntityStatus = "Active" | "Archived";
 export type ModulePriority = "Low" | "Medium" | "High" | "Critical";
-export type HistoryStatus = "Draft" | "Reviewed" | "Approved";
+export type HistoryStatus =
+  | "Draft"
+  | "Submitted for Review"
+  | "Changes Requested"
+  | "Approved"
+  | "Rejected";
 export type ExportFormat = "excel" | "pdf";
 export type ExportType = "version" | "versions" | "requirement" | "project" | "filtered";
+export type UserRole = "Admin" | "QA Lead" | "QA Engineer" | "Viewer";
+export type WorkspaceRole = "Owner" | "Admin" | "QA Lead" | "QA Engineer" | "Viewer";
+export type ProjectPermissionLevel = "Full Access" | "Edit Access" | "Review Access" | "View Only";
+export type MemberStatus = "Active" | "Inactive" | "Removed";
+export type InviteStatus = "Pending" | "Accepted" | "Expired" | "Revoked";
+export type ReviewAction =
+  | "Submitted for Review"
+  | "Approved"
+  | "Changes Requested"
+  | "Rejected"
+  | "Comment Added"
+  | "Exported Approved Version";
 
 export interface ProjectSummary {
   id: string;
@@ -20,6 +37,72 @@ export interface ProjectSummary {
   totalRequirements: number;
   totalTestCases: number;
   lastUpdatedAt: string;
+}
+
+export interface Workspace {
+  id: string;
+  workspaceName: string;
+  description: string;
+  logo?: string;
+  ownerId: string;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: WorkspaceRole;
+  status: MemberStatus;
+  assignedProjects: Array<{ projectId: string; permission: ProjectPermissionLevel }>;
+  joinedAt: string;
+  lastActiveAt: string;
+}
+
+export interface WorkspaceInvite {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: WorkspaceRole;
+  assignedProjects: Array<{ projectId: string; permission: ProjectPermissionLevel }>;
+  message?: string;
+  token: string;
+  inviteLink?: string;
+  status: InviteStatus;
+  invitedBy: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface WorkspacePermission {
+  id: string;
+  workspaceId: string;
+  role: WorkspaceRole;
+  permissions: string[];
+}
+
+export interface ActivityLog {
+  id: string;
+  workspaceId: string;
+  actorId: string;
+  actorName: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string;
+  oldValue?: unknown;
+  newValue?: unknown;
+  createdAt: string;
+}
+
+export interface WorkspaceDetail {
+  workspace: Workspace;
+  members: WorkspaceMember[];
+  invites: WorkspaceInvite[];
+  activityLogs: ActivityLog[];
 }
 
 export interface ProjectModule {
@@ -60,6 +143,16 @@ export interface TestCaseGenerationHistory {
   testType: TestFocus;
   coverageScore: number;
   status: HistoryStatus;
+  reviewStatus: HistoryStatus;
+  submittedBy?: string;
+  submittedAt?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  isLocked: boolean;
   updatedAt: string;
   output: TestPlan;
 }
@@ -101,6 +194,36 @@ export interface ExportHistoryRecord {
   requirementId?: string;
   totalRecords: number;
   createdAt: string;
+}
+
+export interface ReviewComment {
+  id: string;
+  historyId: string;
+  userId: string;
+  userName: string;
+  role: UserRole;
+  message: string;
+  actionType: ReviewAction;
+  createdAt: string;
+}
+
+export interface ReviewAuditTrail {
+  id: string;
+  historyId: string;
+  action: ReviewAction;
+  userId: string;
+  userName: string;
+  role: UserRole;
+  oldStatus?: HistoryStatus;
+  newStatus?: HistoryStatus;
+  timestamp: string;
+  comment?: string;
+}
+
+export interface ReviewDetail {
+  history: TestCaseHistoryRecord;
+  comments: ReviewComment[];
+  auditTrail: ReviewAuditTrail[];
 }
 
 export interface AIChatMessage {
@@ -162,7 +285,129 @@ export interface DashboardStats {
   totalRequirements: number;
   totalTestCases: number;
   averageTestCoverageScore: number;
+  pendingReviews: number;
+  approvedTestCases: number;
+  changesRequested: number;
+  rejectedItems: number;
+  averageApprovalTimeHours: number;
   recentlyUpdatedProjects: ProjectSummary[];
+}
+
+export interface AnalyticsFilters {
+  workspaceId?: string;
+  projectId?: string;
+  moduleId?: string;
+  userId?: string;
+  status?: HistoryStatus;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface AnalyticsSummary {
+  totalProjects: number;
+  totalModules: number;
+  totalRequirements: number;
+  totalTestCasesGenerated: number;
+  averageCoverageScore: number;
+  approvedTestCases: number;
+  pendingReviews: number;
+  changesRequested: number;
+  rejectedTestCases: number;
+  totalExports: number;
+  aiChatInteractions: number;
+}
+
+export interface AnalyticsCoverage {
+  byProject: Array<{ projectId: string; projectName: string; averageCoverageScore: number }>;
+  trend: Array<{ date: string; averageCoverageScore: number }>;
+  lowCoverageRequirements: Array<{
+    historyId: string;
+    requirementId: string;
+    requirementTitle: string;
+    projectName: string;
+    moduleName: string;
+    coverageScore: number;
+    version: number;
+    generatedAt: string;
+  }>;
+  highCoverageRequirements: Array<{
+    historyId: string;
+    requirementId: string;
+    requirementTitle: string;
+    projectName: string;
+    moduleName: string;
+    coverageScore: number;
+    version: number;
+    generatedAt: string;
+  }>;
+  recommendation: string;
+}
+
+export interface AnalyticsGeneration {
+  generatedOverTime: Array<{ name: string; versions: number }>;
+  caseDistribution: Array<{ name: string; value: number }>;
+  generatedByProject: Array<{ name: string; testCases: number }>;
+  generatedByUser: Array<{ name: string; testCases: number }>;
+  mostActiveModules: Array<{ name: string; testCases: number }>;
+}
+
+export interface AnalyticsReview {
+  pendingReviewCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  changesRequestedCount: number;
+  averageApprovalTimeHours: number;
+  statusDistribution: Array<{ name: string; value: number }>;
+  reviewBottlenecks: Array<{
+    historyId: string;
+    requirementTitle: string;
+    projectName: string;
+    submittedAt: string;
+    waitingDays: number;
+  }>;
+  reviewerActivity: Array<{ name: string; reviewsCompleted: number }>;
+}
+
+export interface AnalyticsProjectHealth {
+  projectId: string;
+  projectName: string;
+  totalRequirements: number;
+  totalGeneratedVersions: number;
+  averageCoverageScore: number;
+  pendingReviews: number;
+  approvedVersions: number;
+  lastActivityDate: string;
+  healthStatus: "Healthy" | "Needs Attention" | "Critical";
+}
+
+export interface AnalyticsUserProductivity {
+  userId: string;
+  userName: string;
+  role: WorkspaceRole;
+  testCasesGenerated: number;
+  reviewsCompleted: number;
+  approvedVersions: number;
+  aiChatUsage: number;
+  exports: number;
+  lastActiveDate: string;
+}
+
+export interface AnalyticsAIUsage {
+  totalAIGenerations: number;
+  totalAIChatMessages: number;
+  mostUsedQuickPrompts: Array<{ name: string; count: number }>;
+  averageCoverageImprovementAfterAIChat: number;
+  aiGeneratedVersionsSaved: number;
+  usageOverTime: Array<{ name: string; messages: number }>;
+}
+
+export interface AnalyticsExports {
+  totalExcelExports: number;
+  totalPdfExports: number;
+  exportsByProject: Array<{ name: string; exports: number }>;
+  exportsByUser: Array<{ name: string; exports: number }>;
+  mostExportedRequirements: Array<{ name: string; exports: number }>;
+  approvedVsDraftExportCount: Array<{ name: string; value: number }>;
 }
 
 export interface CreateProjectInput {
@@ -214,6 +459,15 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 function toQueryString(filters: HistoryFilters) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function analyticsQueryString(filters: AnalyticsFilters) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params.set(key, value);
@@ -344,4 +598,116 @@ export const projectApi = {
       method: "POST",
       body: JSON.stringify({ historyVersionId }),
     }),
+  submitForReview: (historyId: string, comment?: string) =>
+    apiRequest<TestCaseHistoryRecord>(`/api/review/submit/${historyId}`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    }),
+  getReviewQueue: () => apiRequest<TestCaseHistoryRecord[]>("/api/review/queue"),
+  getReviewDetail: (historyId: string) => apiRequest<ReviewDetail>(`/api/review/${historyId}`),
+  approveReview: (historyId: string, comment?: string) =>
+    apiRequest<TestCaseHistoryRecord>(`/api/review/approve/${historyId}`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    }),
+  requestReviewChanges: (historyId: string, comment: string) =>
+    apiRequest<TestCaseHistoryRecord>(`/api/review/request-changes/${historyId}`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    }),
+  rejectReview: (historyId: string, comment: string) =>
+    apiRequest<TestCaseHistoryRecord>(`/api/review/reject/${historyId}`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    }),
+  addReviewComment: (historyId: string, comment: string) =>
+    apiRequest<ReviewComment>(`/api/review/comment/${historyId}`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    }),
+  getReviewComments: (historyId: string) =>
+    apiRequest<ReviewComment[]>(`/api/review/comments/${historyId}`),
+  listWorkspaces: () => apiRequest<Workspace[]>("/api/workspaces"),
+  createWorkspace: (input: { workspaceName: string; description: string; logo?: string }) =>
+    apiRequest<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify(input) }),
+  getWorkspace: (workspaceId: string) => apiRequest<WorkspaceDetail>(`/api/workspaces/${workspaceId}`),
+  updateWorkspace: (
+    workspaceId: string,
+    input: Partial<Pick<Workspace, "workspaceName" | "description" | "logo">>,
+  ) => apiRequest<Workspace>(`/api/workspaces/${workspaceId}`, { method: "PUT", body: JSON.stringify(input) }),
+  archiveWorkspace: (workspaceId: string) =>
+    apiRequest<Workspace>(`/api/workspaces/${workspaceId}/archive`, { method: "PATCH" }),
+  deleteWorkspace: (workspaceId: string) =>
+    apiRequest<void>(`/api/workspaces/${workspaceId}`, { method: "DELETE" }),
+  listWorkspaceMembers: (workspaceId: string) =>
+    apiRequest<WorkspaceMember[]>(`/api/workspaces/${workspaceId}/members`),
+  updateMemberRole: (workspaceId: string, memberId: string, role: WorkspaceRole) =>
+    apiRequest<WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${memberId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  updateMemberProjects: (
+    workspaceId: string,
+    memberId: string,
+    assignedProjects: WorkspaceMember["assignedProjects"],
+  ) =>
+    apiRequest<WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${memberId}/projects`, {
+      method: "PATCH",
+      body: JSON.stringify({ assignedProjects }),
+    }),
+  removeMember: (workspaceId: string, memberId: string) =>
+    apiRequest<void>(`/api/workspaces/${workspaceId}/members/${memberId}`, { method: "DELETE" }),
+  deactivateMember: (workspaceId: string, memberId: string) =>
+    apiRequest<WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${memberId}/deactivate`, {
+      method: "PATCH",
+    }),
+  createInvite: (
+    workspaceId: string,
+    input: { email: string; role: WorkspaceRole; assignedProjects: WorkspaceInvite["assignedProjects"]; message?: string },
+  ) =>
+    apiRequest<WorkspaceInvite>(`/api/workspaces/${workspaceId}/invites`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listInvites: (workspaceId: string) => apiRequest<WorkspaceInvite[]>(`/api/workspaces/${workspaceId}/invites`),
+  acceptInvite: (token: string) =>
+    apiRequest<WorkspaceMember>("/api/workspaces/invites/accept", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  revokeInvite: (workspaceId: string, inviteId: string) =>
+    apiRequest<WorkspaceInvite>(`/api/workspaces/${workspaceId}/invites/${inviteId}/revoke`, {
+      method: "PATCH",
+    }),
+  resendInvite: (workspaceId: string, inviteId: string) =>
+    apiRequest<WorkspaceInvite>(`/api/workspaces/${workspaceId}/invites/${inviteId}/resend`, {
+      method: "POST",
+    }),
+  getMyPermissions: (workspaceId: string) =>
+    apiRequest<{ userId: string; role: WorkspaceRole; permissions: string[]; assignedProjects: WorkspaceMember["assignedProjects"] }>(
+      `/api/workspaces/${workspaceId}/permissions/me`,
+    ),
+  listRoles: (workspaceId: string) =>
+    apiRequest<WorkspacePermission[]>(`/api/workspaces/${workspaceId}/roles`),
+  updateRolePermissions: (workspaceId: string, role: WorkspaceRole, permissions: string[]) =>
+    apiRequest<WorkspacePermission>(`/api/workspaces/${workspaceId}/roles/${role}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role, permissions }),
+    }),
+  getAnalyticsSummary: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsSummary>(`/api/analytics/summary${analyticsQueryString(filters)}`),
+  getAnalyticsCoverage: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsCoverage>(`/api/analytics/coverage${analyticsQueryString(filters)}`),
+  getAnalyticsGeneration: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsGeneration>(`/api/analytics/generation${analyticsQueryString(filters)}`),
+  getAnalyticsReview: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsReview>(`/api/analytics/review${analyticsQueryString(filters)}`),
+  getAnalyticsProjectsHealth: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsProjectHealth[]>(`/api/analytics/projects-health${analyticsQueryString(filters)}`),
+  getAnalyticsUsersProductivity: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsUserProductivity[]>(`/api/analytics/users-productivity${analyticsQueryString(filters)}`),
+  getAnalyticsAIUsage: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsAIUsage>(`/api/analytics/ai-usage${analyticsQueryString(filters)}`),
+  getAnalyticsExports: (filters: AnalyticsFilters = {}) =>
+    apiRequest<AnalyticsExports>(`/api/analytics/exports${analyticsQueryString(filters)}`),
 };

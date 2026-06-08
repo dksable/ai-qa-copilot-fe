@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Sparkles,
   Wand2,
@@ -36,7 +36,27 @@ import {
   Bot,
   Send,
   MessageSquare,
+  ClipboardList,
+  Users,
+  BarChart3,
+  TrendingUp,
 } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -75,6 +95,15 @@ import {
   projectApi,
   type AIChat,
   type AIChatSummary,
+  type AnalyticsAIUsage,
+  type AnalyticsCoverage,
+  type AnalyticsExports,
+  type AnalyticsFilters,
+  type AnalyticsGeneration,
+  type AnalyticsProjectHealth,
+  type AnalyticsReview,
+  type AnalyticsSummary,
+  type AnalyticsUserProductivity,
   type CreateProjectInput,
   type DashboardStats,
   type EntityStatus,
@@ -88,6 +117,11 @@ import {
   type ProjectModule,
   type ProjectSummary,
   type Requirement,
+  type ReviewDetail,
+  type Workspace,
+  type WorkspaceDetail,
+  type WorkspaceMember,
+  type WorkspaceRole,
   type TestCaseHistoryCompare,
   type TestCaseHistoryRecord,
   type TestCaseGenerationHistory,
@@ -105,7 +139,18 @@ import type {
 } from "@/lib/api/coverageScore";
 
 type Theme = "light" | "dark";
-type ActiveView = "generator" | "projects" | "history" | "chat";
+type ActiveView = "generator" | "projects" | "history" | "review" | "chat" | "workspace" | "analytics";
+
+interface AnalyticsBundle {
+  summary: AnalyticsSummary;
+  coverage: AnalyticsCoverage;
+  generation: AnalyticsGeneration;
+  review: AnalyticsReview;
+  projectHealth: AnalyticsProjectHealth[];
+  userProductivity: AnalyticsUserProductivity[];
+  aiUsage: AnalyticsAIUsage;
+  exports: AnalyticsExports;
+}
 
 const EXAMPLE = `As a registered user, I want to reset my password via email so that I can regain access to my account if I forget my credentials.
 
@@ -151,6 +196,16 @@ export default function App() {
   const [chatMessage, setChatMessage] = useState("");
   const [selectedChatHistoryVersionId, setSelectedChatHistoryVersionId] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState<TestCaseHistoryRecord[]>([]);
+  const [reviewDetail, setReviewDetail] = useState<ReviewDetail | null>(null);
+  const [isReviewLoading, setIsReviewLoading] = useState(false);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
+  const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const [analytics, setAnalytics] = useState<AnalyticsBundle | null>(null);
+  const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilters>({});
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -211,11 +266,68 @@ export default function App() {
     }
   };
 
+  const refreshReviewQueue = async () => {
+    try {
+      setIsReviewLoading(true);
+      setReviewQueue(await projectApi.getReviewQueue());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load review queue");
+    } finally {
+      setIsReviewLoading(false);
+    }
+  };
+
+  const refreshWorkspace = async (workspaceId = selectedWorkspaceId) => {
+    try {
+      setIsWorkspaceLoading(true);
+      const workspaceList = await projectApi.listWorkspaces();
+      setWorkspaces(workspaceList);
+      const nextWorkspaceId = workspaceId || workspaceList[0]?.id || "";
+      setSelectedWorkspaceId(nextWorkspaceId);
+      if (nextWorkspaceId) setWorkspaceDetail(await projectApi.getWorkspace(nextWorkspaceId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load workspace");
+    } finally {
+      setIsWorkspaceLoading(false);
+    }
+  };
+
+  const refreshAnalytics = async (filters = analyticsFilters) => {
+    try {
+      setIsAnalyticsLoading(true);
+      const [
+        summary,
+        coverage,
+        generation,
+        review,
+        projectHealth,
+        userProductivity,
+        aiUsage,
+        exports,
+      ] = await Promise.all([
+        projectApi.getAnalyticsSummary(filters),
+        projectApi.getAnalyticsCoverage(filters),
+        projectApi.getAnalyticsGeneration(filters),
+        projectApi.getAnalyticsReview(filters),
+        projectApi.getAnalyticsProjectsHealth(filters),
+        projectApi.getAnalyticsUsersProductivity(filters),
+        projectApi.getAnalyticsAIUsage(filters),
+        projectApi.getAnalyticsExports(filters),
+      ]);
+      setAnalytics({ summary, coverage, generation, review, projectHealth, userProductivity, aiUsage, exports });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load analytics");
+    } finally {
+      setIsAnalyticsLoading(false);
+    }
+  };
+
   const runExport = async (label: string, action: () => Promise<void>) => {
     try {
       setIsExporting(true);
       await action();
       await refreshExportHistory();
+      await refreshAnalytics(analyticsFilters);
       toast.success(`${label} export downloaded`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Export failed");
@@ -229,6 +341,9 @@ export default function App() {
     void refreshHistory({});
     void refreshExportHistory();
     void refreshChatHistory();
+    void refreshReviewQueue();
+    void refreshWorkspace("");
+    void refreshAnalytics({});
   }, []);
 
   useEffect(() => {
@@ -276,6 +391,7 @@ export default function App() {
       }
       await refreshProjects(selectedProjectId);
       await refreshHistory();
+      await refreshAnalytics(analyticsFilters);
       toast.success("Test plan generated");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Generation failed");
@@ -413,6 +529,12 @@ export default function App() {
               setSelectedHistoryId("");
               await refreshHistory(historyFilters);
             }}
+            onSubmitForReview={async (historyId, comment) => {
+              await projectApi.submitForReview(historyId, comment);
+              toast.success("Submitted for review");
+              await refreshHistory(historyFilters);
+              await refreshReviewQueue();
+            }}
             onCompareFromChange={setCompareFromId}
             onCompareToChange={setCompareToId}
             onCompare={async () => {
@@ -443,7 +565,43 @@ export default function App() {
               )
             }
           />
-        ) : (
+        ) : activeView === "review" ? (
+          <ReviewQueuePage
+            queue={reviewQueue}
+            detail={reviewDetail}
+            isLoading={isReviewLoading}
+            onRefresh={refreshReviewQueue}
+            onOpenReview={async (historyId) => {
+              setReviewDetail(await projectApi.getReviewDetail(historyId));
+            }}
+            onApprove={async (historyId, comment) => {
+              await projectApi.approveReview(historyId, comment);
+              toast.success("Version approved");
+              setReviewDetail(await projectApi.getReviewDetail(historyId));
+              await refreshReviewQueue();
+              await refreshHistory();
+            }}
+            onRequestChanges={async (historyId, comment) => {
+              await projectApi.requestReviewChanges(historyId, comment);
+              toast.success("Changes requested");
+              setReviewDetail(await projectApi.getReviewDetail(historyId));
+              await refreshReviewQueue();
+              await refreshHistory();
+            }}
+            onReject={async (historyId, comment) => {
+              await projectApi.rejectReview(historyId, comment);
+              toast.success("Version rejected");
+              setReviewDetail(await projectApi.getReviewDetail(historyId));
+              await refreshReviewQueue();
+              await refreshHistory();
+            }}
+            onComment={async (historyId, comment) => {
+              await projectApi.addReviewComment(historyId, comment);
+              toast.success("Comment added");
+              setReviewDetail(await projectApi.getReviewDetail(historyId));
+            }}
+          />
+        ) : activeView === "chat" ? (
           <AIChatPage
             projects={projects}
             projectDetail={projectDetail}
@@ -533,6 +691,31 @@ export default function App() {
               await refreshHistory();
             }}
           />
+        ) : activeView === "analytics" ? (
+          <AnalyticsDashboardPage
+            analytics={analytics}
+            filters={analyticsFilters}
+            workspaces={workspaces}
+            selectedWorkspaceId={selectedWorkspaceId}
+            projects={projects}
+            projectDetail={projectDetail}
+            isLoading={isAnalyticsLoading}
+            onFiltersChange={(filters) => {
+              setAnalyticsFilters(filters);
+              void refreshAnalytics(filters);
+            }}
+            onRefresh={() => refreshAnalytics(analyticsFilters)}
+          />
+        ) : (
+          <TeamWorkspacePage
+            workspaces={workspaces}
+            selectedWorkspaceId={selectedWorkspaceId}
+            detail={workspaceDetail}
+            projects={projects}
+            isLoading={isWorkspaceLoading}
+            onSelectWorkspace={(workspaceId) => void refreshWorkspace(workspaceId)}
+            onRefresh={() => refreshWorkspace(selectedWorkspaceId)}
+          />
         )}
       </main>
 
@@ -557,7 +740,10 @@ function Nav({
     { label: "Generator", value: "generator", icon: Wand2 },
     { label: "Projects", value: "projects", icon: FolderKanban },
     { label: "Test Case History", value: "history", icon: History },
+    { label: "Review Queue", value: "review", icon: ClipboardList },
     { label: "AI Chat", value: "chat", icon: Bot },
+    { label: "Team Workspace", value: "workspace", icon: Users },
+    { label: "Analytics", value: "analytics", icon: BarChart3 },
   ];
 
   return (
@@ -887,10 +1073,19 @@ function DashboardCards({ dashboard }: { dashboard: DashboardStats | null }) {
     { label: "Requirements", value: dashboard?.totalRequirements ?? 0, icon: FileText },
     { label: "Test Cases", value: dashboard?.totalTestCases ?? 0, icon: ClipboardCheck },
     { label: "Avg Coverage", value: `${dashboard?.averageTestCoverageScore ?? 0}%`, icon: Gauge },
+    { label: "Pending Reviews", value: dashboard?.pendingReviews ?? 0, icon: ClipboardList },
+    { label: "Approved", value: dashboard?.approvedTestCases ?? 0, icon: CheckCircle2 },
+    { label: "Changes Requested", value: dashboard?.changesRequested ?? 0, icon: AlertTriangle },
+    { label: "Rejected", value: dashboard?.rejectedItems ?? 0, icon: XCircle },
+    {
+      label: "Avg Approval Time",
+      value: `${dashboard?.averageApprovalTimeHours ?? 0}h`,
+      icon: CalendarDays,
+    },
   ];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
       {items.map(({ label, value, icon: Icon }) => (
         <Card key={label} className="border-border/50 bg-card/60 p-4 backdrop-blur">
           <div className="flex items-center justify-between">
@@ -1578,10 +1773,14 @@ function historyStatusClass(status: HistoryStatus) {
   switch (status) {
     case "Approved":
       return "border-success/40 bg-success/10 text-success";
-    case "Reviewed":
+    case "Submitted for Review":
       return "border-primary/40 bg-primary/10 text-primary";
-    default:
+    case "Rejected":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "Changes Requested":
       return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-muted-foreground/30 bg-muted/30 text-muted-foreground";
   }
 }
 
@@ -1602,6 +1801,7 @@ function TestCaseHistoryPage({
   onFiltersChange,
   onStatusChange,
   onDelete,
+  onSubmitForReview,
   onCompareFromChange,
   onCompareToChange,
   onCompare,
@@ -1626,6 +1826,7 @@ function TestCaseHistoryPage({
   onFiltersChange: (filters: HistoryFilters) => void;
   onStatusChange: (historyId: string, status: HistoryStatus) => void;
   onDelete: (historyId: string) => void;
+  onSubmitForReview: (historyId: string, comment?: string) => void;
   onCompareFromChange: (historyId: string) => void;
   onCompareToChange: (historyId: string) => void;
   onCompare: () => void;
@@ -1744,7 +1945,7 @@ function TestCaseHistoryPage({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
-              {["Draft", "Reviewed", "Approved"].map((status) => (
+              {["Draft", "Submitted for Review", "Changes Requested", "Approved", "Rejected"].map((status) => (
                 <SelectItem key={status} value={status}>
                   {status}
                 </SelectItem>
@@ -1826,8 +2027,8 @@ function TestCaseHistoryPage({
                         {item.projectName} / {item.moduleName}
                       </p>
                     </div>
-                    <Badge variant="outline" className={cn("text-xs", historyStatusClass(item.status))}>
-                      {item.status}
+                    <Badge variant="outline" className={cn("text-xs", historyStatusClass(item.reviewStatus))}>
+                      {item.reviewStatus}
                     </Badge>
                   </div>
                   <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
@@ -1856,18 +2057,33 @@ function TestCaseHistoryPage({
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
-                      value={selectedHistory.status}
+                      value={selectedHistory.reviewStatus}
                       onValueChange={(status) => onStatusChange(selectedHistory.id, status as HistoryStatus)}
+                      disabled={selectedHistory.isLocked}
                     >
-                      <SelectTrigger className="h-9 w-[140px]">
+                      <SelectTrigger className="h-9 w-[190px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Draft">Draft</SelectItem>
-                        <SelectItem value="Reviewed">Reviewed</SelectItem>
+                        <SelectItem value="Submitted for Review">Submitted for Review</SelectItem>
+                        <SelectItem value="Changes Requested">Changes Requested</SelectItem>
                         <SelectItem value="Approved">Approved</SelectItem>
+                        <SelectItem value="Rejected">Rejected</SelectItem>
                       </SelectContent>
                     </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!["Draft", "Changes Requested"].includes(selectedHistory.reviewStatus)}
+                      onClick={() => {
+                        if (!window.confirm("Submit this version for review?")) return;
+                        onSubmitForReview(selectedHistory.id, window.prompt("Optional submit comment") ?? undefined);
+                      }}
+                    >
+                      <ClipboardList className="size-3.5" />
+                      Submit for Review
+                    </Button>
                     <ExportDropdown
                       disabled={isExporting}
                       onExport={(format) => onExportVersions([selectedHistory.id], format)}
@@ -2099,6 +2315,1108 @@ function CompareList({
       ) : (
         <p className="mt-2 text-xs text-muted-foreground">No changes detected.</p>
       )}
+    </div>
+  );
+}
+
+const CHART_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6"];
+
+function AnalyticsDashboardPage({
+  analytics,
+  filters,
+  workspaces,
+  selectedWorkspaceId,
+  projects,
+  projectDetail,
+  isLoading,
+  onFiltersChange,
+  onRefresh,
+}: {
+  analytics: AnalyticsBundle | null;
+  filters: AnalyticsFilters;
+  workspaces: Workspace[];
+  selectedWorkspaceId: string;
+  projects: ProjectSummary[];
+  projectDetail: ProjectDetail | null;
+  isLoading: boolean;
+  onFiltersChange: (filters: AnalyticsFilters) => void;
+  onRefresh: () => void;
+}) {
+  const updateFilter = (patch: Partial<AnalyticsFilters>) => {
+    onFiltersChange({ ...filters, ...patch });
+  };
+  const selectedProjectModules = filters.projectId && projectDetail?.project.id === filters.projectId ? projectDetail.modules : [];
+
+  if (isLoading && !analytics) {
+    return (
+      <div className="grid gap-4">
+        <Skeleton className="h-40 w-full" />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton className="h-80 w-full" />
+          <Skeleton className="h-80 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-6">
+      <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <BarChart3 className="size-4 text-primary" />
+              Analytics Dashboard
+            </div>
+            <h1 className="mt-2 font-display text-3xl font-semibold">QA productivity and coverage insights</h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              Track project health, coverage, review bottlenecks, AI usage, exports, and team throughput.
+            </p>
+          </div>
+          <Button variant="outline" onClick={onRefresh} disabled={isLoading}>
+            {isLoading ? <Loader2 className="size-4 animate-spin" /> : <TrendingUp className="size-4" />}
+            Refresh
+          </Button>
+        </div>
+
+        <div className="mt-6 grid gap-3 lg:grid-cols-6">
+          <Select
+            value={filters.workspaceId ?? selectedWorkspaceId ?? "all"}
+            onValueChange={(workspaceId) => updateFilter({ workspaceId: workspaceId === "all" ? undefined : workspaceId })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Workspace" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All workspaces</SelectItem>
+              {workspaces.map((workspace) => (
+                <SelectItem key={workspace.id} value={workspace.id}>
+                  {workspace.workspaceName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.projectId ?? "all"}
+            onValueChange={(projectId) => updateFilter({ projectId: projectId === "all" ? undefined : projectId, moduleId: undefined })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Project" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All projects</SelectItem>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.moduleId ?? "all"}
+            onValueChange={(moduleId) => updateFilter({ moduleId: moduleId === "all" ? undefined : moduleId })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Module" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All modules</SelectItem>
+              {selectedProjectModules.map((moduleItem) => (
+                <SelectItem key={moduleItem.id} value={moduleItem.id}>
+                  {moduleItem.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.status ?? "all"}
+            onValueChange={(status) => updateFilter({ status: status === "all" ? undefined : (status as HistoryStatus) })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {(["Draft", "Submitted for Review", "Changes Requested", "Approved", "Rejected"] as HistoryStatus[]).map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            type="date"
+            value={filters.dateFrom ?? ""}
+            onChange={(event) => updateFilter({ dateFrom: event.target.value || undefined })}
+          />
+          <Input
+            type="date"
+            value={filters.dateTo ?? ""}
+            onChange={(event) => updateFilter({ dateTo: event.target.value || undefined })}
+          />
+        </div>
+      </Card>
+
+      {analytics ? (
+        <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat label="Total Projects" value={analytics.summary.totalProjects} />
+            <MiniStat label="Total Modules" value={analytics.summary.totalModules} />
+            <MiniStat label="Total Requirements" value={analytics.summary.totalRequirements} />
+            <MiniStat label="Test Cases Generated" value={analytics.summary.totalTestCasesGenerated} />
+            <MiniStat label="Average Coverage" value={`${analytics.summary.averageCoverageScore}%`} />
+            <MiniStat label="Approved Test Cases" value={analytics.summary.approvedTestCases} />
+            <MiniStat label="Pending Reviews" value={analytics.summary.pendingReviews} />
+            <MiniStat label="Changes Requested" value={analytics.summary.changesRequested} />
+            <MiniStat label="Rejected Test Cases" value={analytics.summary.rejectedTestCases} />
+            <MiniStat label="Total Exports" value={analytics.summary.totalExports} />
+            <MiniStat label="AI Chat Interactions" value={analytics.summary.aiChatInteractions} />
+            <MiniStat label="PDF / Excel Exports" value={`${analytics.exports.totalPdfExports}/${analytics.exports.totalExcelExports}`} />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <ChartCard title="Coverage Trend Over Time">
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={analytics.coverage.trend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="averageCoverageScore" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Average Coverage by Project">
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={analytics.coverage.byProject}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="projectName" tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Bar dataKey="averageCoverageScore" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Test Cases by Project">
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={analytics.generation.generatedByProject}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Bar dataKey="testCases" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Review Status Distribution">
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie data={analytics.review.statusDistribution} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={3}>
+                    {analytics.review.statusDistribution.map((entry, index) => (
+                      <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="AI Usage Over Time">
+              <ResponsiveContainer width="100%" height={280}>
+                <AreaChart data={analytics.aiUsage.usageOverTime}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="messages" stroke="#14b8a6" fill="#14b8a6" fillOpacity={0.25} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="User Productivity">
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={analytics.userProductivity}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="userName" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Bar dataKey="testCasesGenerated" fill="#38bdf8" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-display text-xl font-semibold">Low Coverage Requirements</h2>
+                <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">
+                  Below 70%
+                </Badge>
+              </div>
+              {analytics.coverage.lowCoverageRequirements.length ? (
+                <div className="grid gap-3">
+                  {analytics.coverage.lowCoverageRequirements.map((item) => (
+                    <div key={item.historyId} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{item.requirementTitle}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {item.projectName} • {item.moduleName} • Version {item.version}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="border-destructive/40 bg-destructive/10 text-destructive">
+                          {item.coverageScore}%
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+                    {analytics.coverage.recommendation}
+                  </div>
+                </div>
+              ) : (
+                <EmptyAnalyticsState label="No low coverage requirements found." />
+              )}
+            </Card>
+
+            <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+              <h2 className="font-display text-xl font-semibold">Project Health</h2>
+              <div className="mt-4 grid gap-3">
+                {analytics.projectHealth.length ? (
+                  analytics.projectHealth.map((project) => (
+                    <div key={project.projectId} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{project.projectName}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {project.totalRequirements} requirements • {project.totalGeneratedVersions} versions • {project.pendingReviews} pending
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{project.averageCoverageScore}% coverage</Badge>
+                          <Badge variant="outline" className={healthClass(project.healthStatus)}>
+                            {project.healthStatus}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyAnalyticsState label="No project health data yet." />
+                )}
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-3">
+            <AnalyticsList title="Most Active Modules" rows={analytics.generation.mostActiveModules.map((item) => [item.name, item.testCases])} suffix="test cases" />
+            <AnalyticsList title="Quick Prompts" rows={analytics.aiUsage.mostUsedQuickPrompts.map((item) => [item.name, item.count])} suffix="uses" />
+            <AnalyticsList title="Exports by Project" rows={analytics.exports.exportsByProject.map((item) => [item.name, item.exports])} suffix="records" />
+          </div>
+        </>
+      ) : (
+        <EmptyAnalyticsState label="No analytics data loaded yet." />
+      )}
+    </div>
+  );
+}
+
+function ChartCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+      <h2 className="mb-4 font-display text-xl font-semibold">{title}</h2>
+      {children}
+    </Card>
+  );
+}
+
+function AnalyticsList({ title, rows, suffix }: { title: string; rows: Array<[string, number]>; suffix: string }) {
+  return (
+    <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+      <h2 className="font-display text-lg font-semibold">{title}</h2>
+      <div className="mt-4 grid gap-3">
+        {rows.length ? (
+          rows.map(([label, value]) => (
+            <div key={label} className="flex items-center justify-between rounded-lg border border-border/40 bg-surface/40 px-3 py-2">
+              <span className="truncate text-sm">{label}</span>
+              <span className="text-sm font-semibold">
+                {value} {suffix}
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">No data yet.</p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function EmptyAnalyticsState({ label }: { label: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border/50 bg-surface/30 p-8 text-center text-sm text-muted-foreground">
+      {label}
+    </div>
+  );
+}
+
+function healthClass(status: AnalyticsProjectHealth["healthStatus"]) {
+  switch (status) {
+    case "Healthy":
+      return "border-success/40 bg-success/10 text-success";
+    case "Needs Attention":
+      return "border-warning/40 bg-warning/10 text-warning";
+    default:
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+  }
+}
+
+function TeamWorkspacePage({
+  workspaces,
+  selectedWorkspaceId,
+  detail,
+  projects,
+  isLoading,
+  onSelectWorkspace,
+  onRefresh,
+}: {
+  workspaces: Workspace[];
+  selectedWorkspaceId: string;
+  detail: WorkspaceDetail | null;
+  projects: ProjectSummary[];
+  isLoading: boolean;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onRefresh: () => void;
+}) {
+  const [workspaceForm, setWorkspaceForm] = useState({ workspaceName: "", description: "", logo: "" });
+  const [inviteForm, setInviteForm] = useState({
+    email: "",
+    role: "QA Engineer" as WorkspaceRole,
+    projectId: "",
+    permission: "Edit Access" as WorkspaceMember["assignedProjects"][number]["permission"],
+    message: "",
+  });
+  const [latestInviteLink, setLatestInviteLink] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const workspace = detail?.workspace;
+  const members = detail?.members ?? [];
+  const invites = detail?.invites ?? [];
+  const activityLogs = detail?.activityLogs ?? [];
+  const activeMembers = members.filter((member) => member.status === "Active").length;
+  const assignedProjectCount = new Set(
+    members.flatMap((member) => member.assignedProjects.map((project) => project.projectId)),
+  ).size;
+
+  const runWorkspaceAction = async (action: () => Promise<void>, success: string) => {
+    try {
+      setIsSaving(true);
+      await action();
+      toast.success(success);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Workspace action failed");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const createWorkspace = () =>
+    runWorkspaceAction(async () => {
+      if (!workspaceForm.workspaceName.trim()) throw new Error("Workspace name is required.");
+      const created = await projectApi.createWorkspace(workspaceForm);
+      setWorkspaceForm({ workspaceName: "", description: "", logo: "" });
+      onSelectWorkspace(created.id);
+    }, "Workspace created");
+
+  const updateWorkspace = () =>
+    runWorkspaceAction(async () => {
+      if (!workspace) return;
+      const nextName = window.prompt("Workspace name", workspace.workspaceName);
+      if (!nextName?.trim()) return;
+      const nextDescription = window.prompt("Workspace description", workspace.description) ?? workspace.description;
+      await projectApi.updateWorkspace(workspace.id, {
+        workspaceName: nextName,
+        description: nextDescription,
+        logo: workspace.logo,
+      });
+    }, "Workspace updated");
+
+  const inviteMember = () =>
+    runWorkspaceAction(async () => {
+      if (!workspace) return;
+      if (!inviteForm.email.trim()) throw new Error("Email is required.");
+      const assignedProjects = inviteForm.projectId
+        ? [{ projectId: inviteForm.projectId, permission: inviteForm.permission }]
+        : [];
+      const invite = await projectApi.createInvite(workspace.id, {
+        email: inviteForm.email,
+        role: inviteForm.role,
+        assignedProjects,
+        message: inviteForm.message || undefined,
+      });
+      setInviteForm({
+        email: "",
+        role: "QA Engineer",
+        projectId: "",
+        permission: "Edit Access",
+        message: "",
+      });
+      setLatestInviteLink(invite.inviteLink ?? "");
+    }, "Invite created");
+
+  const changeRole = (member: WorkspaceMember) =>
+    runWorkspaceAction(async () => {
+      if (!workspace) return;
+      const role = window.prompt("Role: Owner, Admin, QA Lead, QA Engineer, Viewer", member.role) as WorkspaceRole | null;
+      if (!role) return;
+      await projectApi.updateMemberRole(workspace.id, member.id, role);
+    }, "Role updated");
+
+  const assignProject = (member: WorkspaceMember) =>
+    runWorkspaceAction(async () => {
+      if (!workspace) return;
+      const projectId = window.prompt("Project ID to assign", member.assignedProjects[0]?.projectId ?? projects[0]?.id ?? "");
+      if (!projectId) return;
+      const permission = (window.prompt(
+        "Permission: Full Access, Edit Access, Review Access, View Only",
+        member.assignedProjects[0]?.permission ?? "View Only",
+      ) ?? "View Only") as WorkspaceMember["assignedProjects"][number]["permission"];
+      await projectApi.updateMemberProjects(workspace.id, member.id, [{ projectId, permission }]);
+    }, "Project access updated");
+
+  if (isLoading && !detail) {
+    return (
+      <div className="grid gap-4">
+        <Skeleton className="h-36 w-full" />
+        <Skeleton className="h-80 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-6">
+      <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Users className="size-4 text-primary" />
+              Team Workspace
+            </div>
+            <h1 className="mt-2 font-display text-3xl font-semibold">
+              {workspace?.workspaceName ?? "Create your first workspace"}
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              Manage members, roles, project access, invitations, and workspace activity from one place.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Select value={selectedWorkspaceId} onValueChange={onSelectWorkspace}>
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Select workspace" />
+              </SelectTrigger>
+              <SelectContent>
+                {workspaces.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.workspaceName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {workspace && (
+              <>
+                <Button variant="outline" onClick={updateWorkspace} disabled={isSaving}>
+                  <Pencil className="size-4" />
+                  Edit
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    runWorkspaceAction(async () => {
+                      if (workspace) await projectApi.archiveWorkspace(workspace.id);
+                    }, "Workspace archived")
+                  }
+                  disabled={isSaving || workspace.status === "Archived"}
+                >
+                  <Archive className="size-4" />
+                  Archive
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-4">
+          <MiniStat label="Members" value={members.length} />
+          <MiniStat label="Active Members" value={activeMembers} />
+          <MiniStat label="Pending Invites" value={invites.filter((invite) => invite.status === "Pending").length} />
+          <MiniStat label="Assigned Projects" value={assignedProjectCount || projects.length} />
+        </div>
+      </Card>
+
+      <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+        <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <Input
+            placeholder="Workspace name"
+            value={workspaceForm.workspaceName}
+            onChange={(event) => setWorkspaceForm((value) => ({ ...value, workspaceName: event.target.value }))}
+          />
+          <Input
+            placeholder="Description"
+            value={workspaceForm.description}
+            onChange={(event) => setWorkspaceForm((value) => ({ ...value, description: event.target.value }))}
+          />
+          <Button onClick={createWorkspace} disabled={isSaving}>
+            <Plus className="size-4" />
+            Create Workspace
+          </Button>
+        </div>
+      </Card>
+
+      <Tabs defaultValue="members" className="w-full">
+        <TabsList className="grid w-full grid-cols-5">
+          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="invites">Invites</TabsTrigger>
+          <TabsTrigger value="roles">Roles</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="members">
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="font-display text-xl font-semibold">Team Members</h2>
+                <p className="text-sm text-muted-foreground">Change roles, assign project access, or deactivate users.</p>
+              </div>
+            </div>
+            {members.length ? (
+              <WorkspaceTable
+                rows={members.map((member) => [
+                  <div key="name">
+                    <p className="font-medium">{member.name}</p>
+                    <p className="text-xs text-muted-foreground">{member.email}</p>
+                  </div>,
+                  <Badge key="role" variant="outline" className={roleClass(member.role)}>
+                    {member.role}
+                  </Badge>,
+                  <span key="projects" className="text-sm text-muted-foreground">
+                    {member.assignedProjects.length
+                      ? member.assignedProjects
+                          .map((assignment) => projects.find((project) => project.id === assignment.projectId)?.name ?? "Project")
+                          .join(", ")
+                      : "All workspace projects"}
+                  </span>,
+                  <Badge key="status" variant="outline" className={member.status === "Active" ? statusClass("Active") : statusClass("Archived")}>
+                    {member.status}
+                  </Badge>,
+                  <span key="joined" className="text-xs text-muted-foreground">
+                    {formatDate(member.joinedAt)}
+                  </span>,
+                  <div key="actions" className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => changeRole(member)} disabled={isSaving || member.role === "Owner"}>
+                      Role
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => assignProject(member)} disabled={isSaving}>
+                      Projects
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        runWorkspaceAction(async () => {
+                          if (workspace) await projectApi.deactivateMember(workspace.id, member.id);
+                        }, "Member deactivated")
+                      }
+                      disabled={isSaving || member.role === "Owner"}
+                    >
+                      Deactivate
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => {
+                        if (!window.confirm("Remove this member from the workspace?")) return;
+                        void runWorkspaceAction(async () => {
+                          if (workspace) await projectApi.removeMember(workspace.id, member.id);
+                        }, "Member removed");
+                      }}
+                      disabled={isSaving || member.role === "Owner"}
+                    >
+                      Remove
+                    </Button>
+                  </div>,
+                ])}
+                headers={["Member", "Role", "Assigned Projects", "Status", "Joined", "Actions"]}
+              />
+            ) : (
+              <EmptyWorkspaceState label="No members yet." />
+            )}
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="invites">
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <h2 className="font-display text-xl font-semibold">Invite Members</h2>
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_.8fr_1fr_1fr]">
+              <Input
+                placeholder="Email"
+                value={inviteForm.email}
+                onChange={(event) => setInviteForm((value) => ({ ...value, email: event.target.value }))}
+              />
+              <Select
+                value={inviteForm.role}
+                onValueChange={(role: WorkspaceRole) => setInviteForm((value) => ({ ...value, role }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(["Admin", "QA Lead", "QA Engineer", "Viewer"] as WorkspaceRole[]).map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={inviteForm.projectId || "all"}
+                onValueChange={(projectId) => setInviteForm((value) => ({ ...value, projectId: projectId === "all" ? "" : projectId }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Assigned project" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All projects</SelectItem>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={inviteMember} disabled={isSaving || !workspace}>
+                <Send className="size-4" />
+                Invite
+              </Button>
+            </div>
+            <Textarea
+              className="mt-3 min-h-20"
+              placeholder="Optional message"
+              value={inviteForm.message}
+              onChange={(event) => setInviteForm((value) => ({ ...value, message: event.target.value }))}
+            />
+            {latestInviteLink && (
+              <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+                <p className="font-medium">Invite link</p>
+                <div className="mt-2 flex gap-2">
+                  <Input readOnly value={latestInviteLink} />
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(latestInviteLink);
+                      toast.success("Invite link copied");
+                    }}
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="mt-6">
+              {invites.length ? (
+                <WorkspaceTable
+                  headers={["Email", "Role", "Status", "Expires", "Actions"]}
+                  rows={invites.map((invite) => [
+                    <span key="email" className="font-medium">
+                      {invite.email}
+                    </span>,
+                    <Badge key="role" variant="outline" className={roleClass(invite.role)}>
+                      {invite.role}
+                    </Badge>,
+                    <Badge key="status" variant="outline">
+                      {invite.status}
+                    </Badge>,
+                    <span key="expires" className="text-xs text-muted-foreground">
+                      {formatDate(invite.expiresAt)}
+                    </span>,
+                    <div key="actions" className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          runWorkspaceAction(async () => {
+                            if (workspace) await projectApi.resendInvite(workspace.id, invite.id);
+                          }, "Invite resent")
+                        }
+                        disabled={isSaving}
+                      >
+                        Resend
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          runWorkspaceAction(async () => {
+                            if (workspace) await projectApi.revokeInvite(workspace.id, invite.id);
+                          }, "Invite revoked")
+                        }
+                        disabled={isSaving || invite.status === "Revoked"}
+                      >
+                        Revoke
+                      </Button>
+                    </div>,
+                  ])}
+                />
+              ) : (
+                <EmptyWorkspaceState label="No invites have been sent." />
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="roles">
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <h2 className="font-display text-xl font-semibold">Roles & Permissions</h2>
+            <div className="mt-4 grid gap-3 lg:grid-cols-5">
+              {(["Owner", "Admin", "QA Lead", "QA Engineer", "Viewer"] as WorkspaceRole[]).map((role) => (
+                <div key={role} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                  <Badge variant="outline" className={roleClass(role)}>
+                    {role}
+                  </Badge>
+                  <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
+                    {permissionsForRole(role).map((permission) => (
+                      <li key={permission} className="flex gap-2">
+                        <CheckCircle2 className="size-3.5 shrink-0 text-success" />
+                        {permission}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="activity">
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <h2 className="font-display text-xl font-semibold">Activity Logs</h2>
+            <div className="mt-4 grid gap-3">
+              {activityLogs.length ? (
+                activityLogs.map((log) => (
+                  <div key={log.id} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{log.action}</p>
+                      <span className="text-xs text-muted-foreground">{formatDate(log.createdAt)}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {log.actorName} • {log.resourceType}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <EmptyWorkspaceState label="No workspace activity yet." />
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="overview">
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <h2 className="font-display text-xl font-semibold">Workspace Overview</h2>
+            {workspace ? (
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                  <p className="text-xs text-muted-foreground">Description</p>
+                  <p className="mt-2 text-sm">{workspace.description || "No description added."}</p>
+                </div>
+                <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <Badge variant="outline" className={cn("mt-2", statusClass(workspace.status))}>
+                    {workspace.status}
+                  </Badge>
+                  <p className="mt-3 text-xs text-muted-foreground">Created {formatDate(workspace.createdAt)}</p>
+                </div>
+              </div>
+            ) : (
+              <EmptyWorkspaceState label="Create a workspace to start managing your team." />
+            )}
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function WorkspaceTable({ headers, rows }: { headers: string[]; rows: Array<Array<ReactNode>> }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border/40">
+      <table className="min-w-full divide-y divide-border/40 text-left text-sm">
+        <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+          <tr>
+            {headers.map((header) => (
+              <th key={header} className="px-4 py-3 font-medium">
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/30">
+          {rows.map((row, index) => (
+            <tr key={index} className="bg-card/20">
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex} className="px-4 py-3 align-top">
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EmptyWorkspaceState({ label }: { label: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border/50 bg-surface/30 p-8 text-center text-sm text-muted-foreground">
+      {label}
+    </div>
+  );
+}
+
+function roleClass(role: WorkspaceRole) {
+  switch (role) {
+    case "Owner":
+      return "border-primary/50 bg-primary/15 text-primary";
+    case "Admin":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "QA Lead":
+      return "border-warning/40 bg-warning/10 text-warning";
+    case "QA Engineer":
+      return "border-success/40 bg-success/10 text-success";
+    default:
+      return "border-muted-foreground/30 bg-muted/30 text-muted-foreground";
+  }
+}
+
+function permissionsForRole(role: WorkspaceRole) {
+  const matrix: Record<WorkspaceRole, string[]> = {
+    Owner: ["Manage workspace", "Manage users", "Assign roles", "Approve reviews", "Export approved versions"],
+    Admin: ["Manage projects", "Manage users", "Approve reviews", "View all workspace data"],
+    "QA Lead": ["Create/edit projects", "Review test cases", "Request changes", "Export approved versions"],
+    "QA Engineer": ["Create requirements", "Generate test cases", "Use AI Chat", "Submit for review"],
+    Viewer: ["Read approved test cases", "View assigned projects", "Export approved versions when allowed"],
+  };
+  return matrix[role];
+}
+
+function ReviewQueuePage({
+  queue,
+  detail,
+  isLoading,
+  onRefresh,
+  onOpenReview,
+  onApprove,
+  onRequestChanges,
+  onReject,
+  onComment,
+}: {
+  queue: TestCaseHistoryRecord[];
+  detail: ReviewDetail | null;
+  isLoading: boolean;
+  onRefresh: () => void;
+  onOpenReview: (historyId: string) => void;
+  onApprove: (historyId: string, comment?: string) => void;
+  onRequestChanges: (historyId: string, comment: string) => void;
+  onReject: (historyId: string, comment: string) => void;
+  onComment: (historyId: string, comment: string) => void;
+}) {
+  const [comment, setComment] = useState("");
+
+  const askOptional = (title: string) => window.prompt(title) ?? undefined;
+  const askRequired = (title: string) => {
+    const value = window.prompt(title);
+    if (!value?.trim()) {
+      toast.error("Comment/reason is required.");
+      return null;
+    }
+    return value;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            <ClipboardList className="mr-1 size-3" /> Review workflow
+          </Badge>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">
+            Review Queue
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Review submitted test case versions, request changes, reject, or approve locked final versions.
+          </p>
+        </div>
+        <Button variant="outline" onClick={onRefresh}>
+          {isLoading && <Loader2 className="size-4 animate-spin" />}
+          Refresh
+        </Button>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">Submitted Items</h2>
+            <Badge variant="outline">{queue.length} pending</Badge>
+          </div>
+          {queue.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
+              <ClipboardList className="mx-auto size-8 text-muted-foreground" />
+              <p className="mt-3 text-sm text-muted-foreground">No items submitted for review.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {queue.map((item) => (
+                <div key={item.id} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{item.requirementTitle}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {item.projectName} / {item.moduleName}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={cn("text-xs", historyStatusClass(item.reviewStatus))}>
+                      {item.reviewStatus}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                    <span>Version {item.version}</span>
+                    <span>{item.coverageScore}% coverage</span>
+                    <span>{item.submittedBy ?? "Current User"}</span>
+                    <span>{item.submittedAt ? formatDate(item.submittedAt) : "Not submitted"}</span>
+                  </div>
+                  <Button className="mt-3" size="sm" onClick={() => onOpenReview(item.id)}>
+                    Review
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {detail ? (
+          <div className="space-y-5">
+            <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold">{detail.history.requirementTitle}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Version {detail.history.version} · Submitted by {detail.history.submittedBy ?? "Current User"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Submitted {detail.history.submittedAt ? formatDate(detail.history.submittedAt) : "not yet"}
+                  </p>
+                </div>
+                <Badge variant="outline" className={cn("text-xs", historyStatusClass(detail.history.reviewStatus))}>
+                  {detail.history.reviewStatus}
+                </Badge>
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-4">
+                <MiniStat label="Coverage" value={`${detail.history.coverageScore}%`} />
+                <MiniStat label="Positive" value={detail.history.output.positive.length} />
+                <MiniStat label="Negative" value={detail.history.output.negative.length} />
+                <MiniStat label="Edge" value={detail.history.output.edge.length} />
+              </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button
+                  onClick={() => onApprove(detail.history.id, askOptional("Approval comment"))}
+                  disabled={detail.history.isLocked}
+                >
+                  <CheckCircle2 className="size-4" />
+                  Approve
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const reason = askRequired("Reason for requested changes");
+                    if (reason) onRequestChanges(detail.history.id, reason);
+                  }}
+                  disabled={detail.history.isLocked}
+                >
+                  <AlertTriangle className="size-4" />
+                  Request Changes
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const reason = askRequired("Rejection reason");
+                    if (reason) onReject(detail.history.id, reason);
+                  }}
+                  disabled={detail.history.isLocked}
+                >
+                  <XCircle className="size-4" />
+                  Reject
+                </Button>
+              </div>
+            </Card>
+
+            <Results plan={detail.history.output} />
+
+            <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+              <div className="mb-4 flex items-center gap-2">
+                <MessageSquare className="size-4 text-primary" />
+                <h3 className="font-semibold">Comments</h3>
+              </div>
+              <div className="space-y-3">
+                {detail.comments.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No comments yet.</p>
+                ) : (
+                  detail.comments.map((item) => (
+                    <div key={item.id} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                      <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                        <span>{item.userName} · {item.role} · {item.actionType}</span>
+                        <span>{formatDate(item.createdAt)}</span>
+                      </div>
+                      <p className="mt-2 text-sm">{item.message}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="mt-4 flex gap-2">
+                <Input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Add comment" />
+                <Button
+                  onClick={() => {
+                    if (!comment.trim()) return;
+                    onComment(detail.history.id, comment);
+                    setComment("");
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+              <h3 className="mb-3 font-semibold">Audit Trail</h3>
+              <div className="space-y-2">
+                {detail.auditTrail.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-border/40 bg-surface/40 p-3 text-sm">
+                    <p className="font-medium">{item.action}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.userName} · {formatDate(item.timestamp)} · {item.oldStatus ?? "none"} to {item.newStatus ?? "none"}
+                    </p>
+                    {item.comment && <p className="mt-1 text-xs">{item.comment}</p>}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        ) : (
+          <Card className="border-dashed border-border/50 bg-card/30 p-10 text-center backdrop-blur">
+            <Eye className="mx-auto size-8 text-muted-foreground" />
+            <p className="mt-3 text-sm text-muted-foreground">Select a submitted item to review.</p>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
