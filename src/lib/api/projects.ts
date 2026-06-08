@@ -19,6 +19,7 @@ export type InviteStatus = "Pending" | "Accepted" | "Expired" | "Revoked";
 export type PlanId = "free" | "pro" | "enterprise";
 export type BillingCycle = "monthly" | "yearly";
 export type SubscriptionStatus = "Trialing" | "Active" | "Canceled" | "Past Due";
+export type TrialStatus = "Active" | "Expired" | "Converted";
 export type ReviewAction =
   | "Submitted for Review"
   | "Approved"
@@ -155,6 +156,8 @@ export interface Plan {
     requirementsPerMonth: number | "unlimited";
     aiGenerationsPerMonth: number | "unlimited";
     aiChatMessagesPerMonth: number | "unlimited";
+    exportsPerMonth: number | "unlimited";
+    storageMb: number | "unlimited";
     exports: string;
     analytics: boolean;
     reviewWorkflow: boolean;
@@ -170,6 +173,7 @@ export interface Subscription {
   planId: PlanId;
   billingCycle: BillingCycle;
   status: SubscriptionStatus;
+  trialStartsAt?: string;
   trialEndsAt?: string;
   currentPeriodStart: string;
   currentPeriodEnd: string;
@@ -177,9 +181,47 @@ export interface Subscription {
   updatedAt: string;
 }
 
+export interface Trial {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  subscriptionId: string;
+  planId: PlanId;
+  status: TrialStatus;
+  startsAt: string;
+  endsAt: string;
+  daysRemaining: number;
+  featuresAvailable: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SubscriptionResponse {
   subscription: Subscription;
   plan: Plan;
+  trial?: Trial | null;
+}
+
+export interface UsageMetric {
+  used: number;
+  limit: number | "unlimited";
+}
+
+export interface WorkspaceUsageResponse {
+  subscription: Subscription;
+  plan: Plan;
+  trial?: Trial | null;
+  usage: {
+    workspaces: UsageMetric;
+    members: UsageMetric;
+    projects: UsageMetric;
+    requirements: UsageMetric;
+    aiGenerations: UsageMetric;
+    aiChatMessages: UsageMetric;
+    exports: UsageMetric;
+    activeUsers: UsageMetric;
+    storage: UsageMetric;
+  };
 }
 
 export interface ProjectModule {
@@ -612,6 +654,10 @@ export const projectApi = {
   listPlans: () => apiRequest<Plan[]>("/api/plans"),
   getCurrentSubscription: (workspaceId: string) =>
     apiRequest<SubscriptionResponse>(`/api/subscription/current?workspaceId=${encodeURIComponent(workspaceId)}`),
+  getWorkspaceUsage: (workspaceId: string) =>
+    apiRequest<WorkspaceUsageResponse>(`/api/subscription/usage?workspaceId=${encodeURIComponent(workspaceId)}`),
+  getCurrentTrial: (workspaceId: string) =>
+    apiRequest<Trial | null>(`/api/trial/current?workspaceId=${encodeURIComponent(workspaceId)}`),
   updateSubscription: (input: { workspaceId: string; planId: PlanId; billingCycle?: BillingCycle }) =>
     apiRequest<SubscriptionResponse>("/api/subscription/current", {
       method: "PATCH",

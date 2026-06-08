@@ -134,6 +134,7 @@ import {
   type Plan,
   type PlanId,
   type SubscriptionResponse,
+  type WorkspaceUsageResponse,
   type TestCaseHistoryCompare,
   type TestCaseHistoryRecord,
   type TestCaseGenerationHistory,
@@ -238,6 +239,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(() => Boolean(localStorage.getItem("aiqa_access_token")));
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
+  const [workspaceUsage, setWorkspaceUsage] = useState<WorkspaceUsageResponse | null>(null);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [isPricingLoading, setIsPricingLoading] = useState(false);
   const isAuthenticated = Boolean(auth?.user);
@@ -320,6 +322,7 @@ export default function App() {
       const nextWorkspaceId = workspaceId || workspaceList[0]?.id || "";
       setSelectedWorkspaceId(nextWorkspaceId);
       if (nextWorkspaceId) setWorkspaceDetail(await projectApi.getWorkspace(nextWorkspaceId));
+      if (nextWorkspaceId) void refreshPricing(nextWorkspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load workspace");
     } finally {
@@ -363,8 +366,10 @@ export default function App() {
       await action();
       await refreshExportHistory();
       await refreshAnalytics(analyticsFilters);
+      await refreshPricing(selectedWorkspaceId || auth?.workspace?.id);
       toast.success(`${label} export downloaded`);
     } catch (error) {
+      if (handleLimitExceeded(error)) return;
       toast.error(error instanceof Error ? error.message : "Export failed");
     } finally {
       setIsExporting(false);
@@ -400,8 +405,12 @@ export default function App() {
       const planList = await projectApi.listPlans();
       setPlans(planList);
       if (workspaceId) {
-        const current = await projectApi.getCurrentSubscription(workspaceId);
+        const [current, usage] = await Promise.all([
+          projectApi.getCurrentSubscription(workspaceId),
+          projectApi.getWorkspaceUsage(workspaceId),
+        ]);
         setSubscription(current);
+        setWorkspaceUsage(usage);
         setBillingCycle(current.subscription.billingCycle);
       }
     } catch (error) {
@@ -409,6 +418,16 @@ export default function App() {
     } finally {
       setIsPricingLoading(false);
     }
+  };
+
+  const handleLimitExceeded = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "Plan limit exceeded.";
+    if (!message.includes("Plan limit exceeded")) return false;
+    toast.warning(message);
+    if (window.confirm(`${message}\n\nOpen Pricing to upgrade your plan?`)) {
+      setActiveView("pricing");
+    }
+    return true;
   };
 
   useEffect(() => {
@@ -477,8 +496,10 @@ export default function App() {
       await refreshProjects(selectedProjectId);
       await refreshHistory();
       await refreshAnalytics(analyticsFilters);
+      await refreshPricing();
       toast.success("Test plan generated");
     } catch (error) {
+      if (handleLimitExceeded(error)) return;
       toast.error(error instanceof Error ? error.message : "Generation failed");
     } finally {
       setIsGenerating(false);
@@ -525,6 +546,12 @@ export default function App() {
         )}
       >
         <div className="mx-auto max-w-[1480px]">
+        {isAuthenticated && !["landing", "login", "signup", "forgot-password", "reset-password"].includes(activeView) && (
+          <TrialBanner
+            trial={workspaceUsage?.trial ?? subscription?.trial ?? null}
+            onUpgrade={() => setActiveView("pricing")}
+          />
+        )}
         {activeView === "landing" ? (
           <LandingPage
             onStart={() => setActiveView(isAuthenticated ? "generator" : "signup")}
@@ -572,6 +599,7 @@ export default function App() {
           <PricingPage
             plans={plans}
             subscription={subscription}
+            workspaceUsage={workspaceUsage}
             billingCycle={billingCycle}
             isLoading={isPricingLoading}
             workspaceId={auth?.workspace?.id ?? ""}
@@ -587,6 +615,7 @@ export default function App() {
                 billingCycle,
               });
               setSubscription(updated);
+              await refreshPricing(auth.workspace.id);
               toast.success(`Plan updated to ${updated.plan.name}`);
             }}
           />
@@ -657,7 +686,10 @@ export default function App() {
             onSelectProject={setSelectedProjectId}
             onSelectModule={setSelectedModuleId}
             onSelectRequirement={setSelectedRequirementId}
-            onRefresh={() => refreshProjects(selectedProjectId)}
+            onRefresh={() => {
+              void refreshProjects(selectedProjectId);
+              void refreshPricing(selectedWorkspaceId || auth?.workspace?.id);
+            }}
             isExporting={isExporting}
             onExportRequirement={(requirementId, format) =>
               runExport(format === "excel" ? "Excel" : "PDF", () =>
@@ -669,6 +701,8 @@ export default function App() {
                 projectApi.exportProject(projectId, format),
               )
             }
+            workspaceUsage={workspaceUsage}
+            onLimitExceeded={handleLimitExceeded}
           />
         ) : activeView === "history" ? (
           <TestCaseHistoryPage
@@ -828,7 +862,9 @@ export default function App() {
                 setSelectedChatHistoryVersionId(chat.historyVersionId ?? selectedChatHistoryVersionId);
                 setChatMessage("");
                 await refreshChatHistory();
+                await refreshPricing(selectedWorkspaceId || auth?.workspace?.id);
               } catch (error) {
+                if (handleLimitExceeded(error)) return;
                 toast.error(error instanceof Error ? error.message : "AI chat failed");
               } finally {
                 setIsChatLoading(false);
@@ -862,9 +898,15 @@ export default function App() {
             onHistoryVersionChange={setSelectedChatHistoryVersionId}
             onSaveAsVersion={async () => {
               if (!activeChat) return;
-              const history = await projectApi.saveChatAsVersion(activeChat.id, activeChat.historyVersionId);
-              toast.success(`Saved as Version ${history.version}`);
-              await refreshHistory();
+              try {
+                const history = await projectApi.saveChatAsVersion(activeChat.id, activeChat.historyVersionId);
+                toast.success(`Saved as Version ${history.version}`);
+                await refreshHistory();
+                await refreshPricing(selectedWorkspaceId || auth?.workspace?.id);
+              } catch (error) {
+                if (handleLimitExceeded(error)) return;
+                toast.error(error instanceof Error ? error.message : "Failed to save version");
+              }
             }}
           />
         ) : activeView === "analytics" ? (
@@ -888,9 +930,14 @@ export default function App() {
             selectedWorkspaceId={selectedWorkspaceId}
             detail={workspaceDetail}
             projects={projects}
+            workspaceUsage={workspaceUsage}
             isLoading={isWorkspaceLoading}
             onSelectWorkspace={(workspaceId) => void refreshWorkspace(workspaceId)}
-            onRefresh={() => refreshWorkspace(selectedWorkspaceId)}
+            onRefresh={() => {
+              void refreshWorkspace(selectedWorkspaceId);
+              void refreshPricing(selectedWorkspaceId);
+            }}
+            onLimitExceeded={handleLimitExceeded}
           />
         )}
         </div>
@@ -1175,6 +1222,36 @@ function formatDate(value: string) {
   );
 }
 
+function TrialBanner({
+  trial,
+  onUpgrade,
+}: {
+  trial: WorkspaceUsageResponse["trial"] | null | undefined;
+  onUpgrade: () => void;
+}) {
+  if (!trial || trial.status !== "Active") return null;
+  return (
+    <div className="mb-6 rounded-xl border border-primary/30 bg-primary/10 p-4 text-primary shadow-card">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/15">
+            <Rocket className="size-4" />
+          </span>
+          <div>
+            <p className="font-semibold">Your Pro trial expires in {trial.daysRemaining} days.</p>
+            <p className="mt-1 text-sm text-primary/80">
+              Trial ends on {formatDate(trial.endsAt)}. Upgrade anytime to keep Pro features active.
+            </p>
+          </div>
+        </div>
+        <Button className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onUpgrade}>
+          Upgrade
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function statusClass(status: EntityStatus) {
   return status === "Active"
     ? "border-success/40 bg-success/10 text-success"
@@ -1358,6 +1435,7 @@ function ProjectsPage({
   dashboard,
   projects,
   projectDetail,
+  workspaceUsage,
   selectedProjectId,
   selectedModuleId,
   selectedRequirementId,
@@ -1372,10 +1450,12 @@ function ProjectsPage({
   isExporting,
   onExportRequirement,
   onExportProject,
+  onLimitExceeded,
 }: {
   dashboard: DashboardStats | null;
   projects: ProjectSummary[];
   projectDetail: ProjectDetail | null;
+  workspaceUsage: WorkspaceUsageResponse | null;
   selectedProjectId: string;
   selectedModuleId: string;
   selectedRequirementId: string;
@@ -1390,6 +1470,7 @@ function ProjectsPage({
   isExporting: boolean;
   onExportRequirement: (requirementId: string, format: ExportFormat) => void;
   onExportProject: (projectId: string, format: ExportFormat) => void;
+  onLimitExceeded: (error: unknown) => boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -1412,10 +1493,12 @@ function ProjectsPage({
             onSelectProject(project.id);
             onRefresh();
           }}
+          onLimitExceeded={onLimitExceeded}
         />
       </div>
 
       <DashboardCards dashboard={dashboard} />
+      <WorkspaceUsageDashboard usage={workspaceUsage} />
 
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <ProjectList
@@ -1436,6 +1519,7 @@ function ProjectsPage({
           isExporting={isExporting}
           onExportRequirement={onExportRequirement}
           onExportProject={onExportProject}
+          onLimitExceeded={onLimitExceeded}
         />
       </div>
     </div>
@@ -1485,14 +1569,142 @@ function DashboardCards({ dashboard }: { dashboard: DashboardStats | null }) {
   );
 }
 
+function WorkspaceUsageDashboard({ usage }: { usage: WorkspaceUsageResponse | null }) {
+  if (!usage) return null;
+
+  const items = [
+    { label: "Workspaces", metric: usage.usage.workspaces, icon: Layers },
+    { label: "Members", metric: usage.usage.members, icon: Users },
+    { label: "Active Users", metric: usage.usage.activeUsers, icon: UserCircle },
+    { label: "Projects", metric: usage.usage.projects, icon: FolderKanban },
+    { label: "Requirements", metric: usage.usage.requirements, icon: FileText },
+    { label: "AI Generations", metric: usage.usage.aiGenerations, icon: Sparkles },
+    { label: "AI Chat Messages", metric: usage.usage.aiChatMessages, icon: MessageSquare },
+    { label: "Exports", metric: usage.usage.exports, icon: Download },
+    { label: "Storage", metric: usage.usage.storage, icon: Database, unit: "MB" },
+  ];
+  const warnings = items.filter(({ metric }) => {
+    if (metric.limit === "unlimited" || metric.limit === 0) return false;
+    return metric.used / metric.limit >= 0.8;
+  });
+
+  return (
+    <Card className="app-card p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Workspace Usage</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Current limits for the {usage.plan.name} plan.
+          </p>
+        </div>
+        <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
+          {usage.plan.name}
+        </Badge>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {items.map(({ label, metric, icon: Icon, unit }) => {
+          const isUnlimited = metric.limit === "unlimited";
+          const percent = isUnlimited || metric.limit === 0 ? 8 : Math.min(100, Math.round((metric.used / metric.limit) * 100));
+          const isFull = !isUnlimited && metric.used >= metric.limit;
+          const usedText = unit ? `${metric.used} ${unit}` : metric.used;
+          const limitText = isUnlimited ? "Unlimited" : unit ? `${metric.limit} ${unit}` : metric.limit;
+          return (
+            <div key={label} className="rounded-lg border border-border/50 bg-surface/40 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="text-sm font-medium">{label}</span>
+                </div>
+                <span className={cn("text-sm font-semibold", isFull && "text-destructive")}>
+                  {usedText} / {limitText}
+                </span>
+              </div>
+              <Progress value={percent} className="mt-3 h-2" />
+            </div>
+          );
+        })}
+      </div>
+      {warnings.length > 0 && (
+        <div className="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+          <div className="flex gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-semibold">Usage warning</p>
+              <p className="mt-1">
+                {warnings.map((item) => item.label).join(", ")} {warnings.length === 1 ? "is" : "are"} above 80% of the monthly quota.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TrialDashboard({
+  trial,
+  onUpgrade,
+}: {
+  trial: WorkspaceUsageResponse["trial"] | null | undefined;
+  onUpgrade: () => void;
+}) {
+  if (!trial) return null;
+  const isActive = trial.status === "Active";
+  return (
+    <Card className="app-card p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <Badge variant="outline" className={cn(isActive ? "border-primary/40 bg-primary/10 text-primary" : "border-muted-foreground/30")}>
+            {trial.status === "Active" ? "Pro Trial" : `Trial ${trial.status}`}
+          </Badge>
+          <h2 className="mt-3 font-display text-2xl font-semibold">Trial Dashboard</h2>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Track your trial window and the Pro features currently available to this workspace.
+          </p>
+        </div>
+        <div className="rounded-lg border border-border/50 bg-surface/40 p-4 text-center">
+          <p className="text-xs uppercase text-muted-foreground">Days Remaining</p>
+          <p className="mt-1 font-display text-4xl font-bold">{trial.daysRemaining}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <MiniStat label="Trial Start Date" value={formatDate(trial.startsAt)} />
+        <MiniStat label="Trial End Date" value={formatDate(trial.endsAt)} />
+        <MiniStat label="Trial Behavior" value={isActive ? "Downgrades to Free on expiry" : "Free plan active"} />
+      </div>
+
+      <div className="mt-5">
+        <p className="text-sm font-semibold">Features Available</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {trial.featuresAvailable.map((feature) => (
+            <div key={feature} className="flex items-center gap-2 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-sm">
+              <CheckCircle2 className="size-4 text-success" />
+              <span>{feature}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Button className="mt-5 bg-gradient-primary text-primary-foreground shadow-glow" onClick={onUpgrade}>
+        Upgrade Plan
+      </Button>
+    </Card>
+  );
+}
+
 function ProjectDialog({
   open,
   onOpenChange,
   onCreated,
+  onLimitExceeded,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (project: ProjectSummary) => void;
+  onLimitExceeded: (error: unknown) => boolean;
 }) {
   const [form, setForm] = useState<CreateProjectInput>({
     name: "",
@@ -1515,6 +1727,7 @@ function ProjectDialog({
       onOpenChange(false);
       onCreated(project);
     } catch (error) {
+      if (onLimitExceeded(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to create project");
     } finally {
       setIsSaving(false);
@@ -1621,7 +1834,6 @@ function ProjectList({
     onSelectProject("");
     onRefresh();
   };
-
   return (
     <Card className="app-card p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1657,57 +1869,54 @@ function ProjectList({
           {visibleProjects.map((project) => {
             const health = project.totalTestCases === 0 ? "Needs Attention" : project.status === "Active" ? "Healthy" : "Archived";
             return (
-            <div
-              key={project.id}
-              className={cn(
-                "rounded-lg border bg-surface/40 p-4 transition-colors",
-                selectedProjectId === project.id
-                  ? "border-primary/50"
-                  : "border-border/40 hover:border-primary/30",
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => onSelectProject(project.id)}
-                className="w-full text-left"
+              <div
+                key={project.id}
+                className={cn(
+                  "rounded-lg border bg-surface/40 p-4 transition-colors",
+                  selectedProjectId === project.id
+                    ? "border-primary/50"
+                    : "border-border/40 hover:border-primary/30",
+                )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold">{project.name}</h3>
-                      <Badge variant="outline" className={cn("text-xs", health === "Healthy" ? "border-success/40 bg-success/10 text-success" : "border-warning/40 bg-warning/10 text-warning")}>
-                        {health}
-                      </Badge>
+                <button type="button" onClick={() => onSelectProject(project.id)} className="w-full text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold">{project.name}</h3>
+                        <Badge variant="outline" className={cn("text-xs", health === "Healthy" ? "border-success/40 bg-success/10 text-success" : "border-warning/40 bg-warning/10 text-warning")}>
+                          {health}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{project.description}</p>
                     </div>
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {project.description}
-                    </p>
+                    <Badge variant="outline" className={cn("text-xs", statusClass(project.status))}>
+                      {project.status}
+                    </Badge>
                   </div>
-                  <Badge variant="outline" className={cn("text-xs", statusClass(project.status))}>{project.status}</Badge>
+                  <div className="mt-4 grid grid-cols-4 gap-2 text-xs text-muted-foreground">
+                    <span>{project.totalModules} modules</span>
+                    <span>{project.totalRequirements} reqs</span>
+                    <span>{project.totalTestCases} tests</span>
+                    <span>{project.domain}</span>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                    <CalendarDays className="size-3.5" />
+                    Updated {formatDate(project.lastUpdatedAt)}
+                  </div>
+                </button>
+                <div className="mt-3 flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => archiveProject(project.id)}>
+                    <Archive className="size-3.5" />
+                    Archive
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => deleteProject(project.id)}>
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </Button>
                 </div>
-                <div className="mt-4 grid grid-cols-4 gap-2 text-xs text-muted-foreground">
-                  <span>{project.totalModules} modules</span>
-                  <span>{project.totalRequirements} reqs</span>
-                  <span>{project.totalTestCases} tests</span>
-                  <span>{project.domain}</span>
-                </div>
-                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                  <CalendarDays className="size-3.5" />
-                  Updated {formatDate(project.lastUpdatedAt)}
-                </div>
-              </button>
-              <div className="mt-3 flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => archiveProject(project.id)}>
-                  <Archive className="size-3.5" />
-                  Archive
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => deleteProject(project.id)}>
-                  <Trash2 className="size-3.5" />
-                  Delete
-                </Button>
               </div>
-            </div>
-          )})}
+            );
+          })}
         </div>
       )}
     </Card>
@@ -1725,6 +1934,7 @@ function ProjectDetailPanel({
   isExporting,
   onExportRequirement,
   onExportProject,
+  onLimitExceeded,
 }: {
   detail: ProjectDetail | null;
   selectedModuleId: string;
@@ -1736,6 +1946,7 @@ function ProjectDetailPanel({
   isExporting: boolean;
   onExportRequirement: (requirementId: string, format: ExportFormat) => void;
   onExportProject: (projectId: string, format: ExportFormat) => void;
+  onLimitExceeded: (error: unknown) => boolean;
 }) {
   if (!detail) {
     return (
@@ -1802,6 +2013,7 @@ function ProjectDetailPanel({
         onRefresh={onRefresh}
         isExporting={isExporting}
         onExportRequirement={onExportRequirement}
+        onLimitExceeded={onLimitExceeded}
       />
 
       <HistoryPanel selectedRequirement={selectedRequirement} historyItems={historyItems} />
@@ -1983,6 +2195,7 @@ function RequirementManager({
   onRefresh,
   isExporting,
   onExportRequirement,
+  onLimitExceeded,
 }: {
   projectId: string;
   selectedModule?: ProjectModule;
@@ -1992,6 +2205,7 @@ function RequirementManager({
   onRefresh: () => void;
   isExporting: boolean;
   onExportRequirement: (requirementId: string, format: ExportFormat) => void;
+  onLimitExceeded: (error: unknown) => boolean;
 }) {
   const [form, setForm] = useState({
     title: "",
@@ -2010,21 +2224,26 @@ function RequirementManager({
       toast.error("Requirement title and description are required.");
       return;
     }
-    const requirement = await projectApi.createRequirement({
-      projectId,
-      moduleId: selectedModule.id,
-      ...form,
-    });
-    toast.success("Requirement added");
-    setForm({
-      title: "",
-      description: "",
-      acceptanceCriteria: "",
-      priority: "Medium",
-      status: "Active",
-    });
-    onSelectRequirement(requirement.id);
-    onRefresh();
+    try {
+      const requirement = await projectApi.createRequirement({
+        projectId,
+        moduleId: selectedModule.id,
+        ...form,
+      });
+      toast.success("Requirement added");
+      setForm({
+        title: "",
+        description: "",
+        acceptanceCriteria: "",
+        priority: "Medium",
+        status: "Active",
+      });
+      onSelectRequirement(requirement.id);
+      onRefresh();
+    } catch (error) {
+      if (onLimitExceeded(error)) return;
+      toast.error(error instanceof Error ? error.message : "Failed to add requirement");
+    }
   };
 
   const editRequirement = async (requirement: Requirement) => {
@@ -3311,6 +3530,7 @@ const CHART_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#1
 function PricingPage({
   plans,
   subscription,
+  workspaceUsage,
   billingCycle,
   isLoading,
   workspaceId,
@@ -3319,6 +3539,7 @@ function PricingPage({
 }: {
   plans: Plan[];
   subscription: SubscriptionResponse | null;
+  workspaceUsage: WorkspaceUsageResponse | null;
   billingCycle: BillingCycle;
   isLoading: boolean;
   workspaceId: string;
@@ -3332,6 +3553,8 @@ function PricingPage({
     ["Requirements / Month", "requirementsPerMonth"],
     ["AI Generations / Month", "aiGenerationsPerMonth"],
     ["AI Chat Messages / Month", "aiChatMessagesPerMonth"],
+    ["Exports / Month", "exportsPerMonth"],
+    ["Storage", "storageMb"],
     ["Exports", "exports"],
     ["Analytics Dashboard", "analytics"],
     ["Review Workflow", "reviewWorkflow"],
@@ -3351,7 +3574,6 @@ function PricingPage({
     if (value === "unlimited") return "Unlimited";
     return String(value);
   };
-
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -3378,6 +3600,8 @@ function PricingPage({
           ))}
         </div>
       </div>
+
+      <TrialDashboard trial={workspaceUsage?.trial ?? subscription?.trial} onUpgrade={() => onPlanChange("pro")} />
 
       {isLoading && !plans.length ? (
         <div className="grid gap-4 lg:grid-cols-3">
@@ -3431,6 +3655,8 @@ function PricingPage({
           })}
         </div>
       )}
+
+      <WorkspaceUsageDashboard usage={workspaceUsage} />
 
       <Card className="app-card p-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -3827,17 +4053,21 @@ function TeamWorkspacePage({
   selectedWorkspaceId,
   detail,
   projects,
+  workspaceUsage,
   isLoading,
   onSelectWorkspace,
   onRefresh,
+  onLimitExceeded,
 }: {
   workspaces: Workspace[];
   selectedWorkspaceId: string;
   detail: WorkspaceDetail | null;
   projects: ProjectSummary[];
+  workspaceUsage: WorkspaceUsageResponse | null;
   isLoading: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
   onRefresh: () => void;
+  onLimitExceeded: (error: unknown) => boolean;
 }) {
   const [workspaceForm, setWorkspaceForm] = useState({ workspaceName: "", description: "", logo: "" });
   const [inviteForm, setInviteForm] = useState({
@@ -3865,6 +4095,7 @@ function TeamWorkspacePage({
       toast.success(success);
       onRefresh();
     } catch (error) {
+      if (onLimitExceeded(error)) return;
       toast.error(error instanceof Error ? error.message : "Workspace action failed");
     } finally {
       setIsSaving(false);
@@ -4003,6 +4234,8 @@ function TeamWorkspacePage({
           <MiniStat label="Assigned Projects" value={assignedProjectCount || projects.length} />
         </div>
       </Card>
+
+      <WorkspaceUsageDashboard usage={workspaceUsage} />
 
       <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
         <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
