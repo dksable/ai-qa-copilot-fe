@@ -606,10 +606,14 @@ export function getHistoryExportUrl(historyId: string, format: "pdf" | "excel" |
 async function downloadBlob(path: string, body: unknown, fallbackName: string) {
   const baseUrl = apiBaseUrl();
   if (!baseUrl) throw new Error("API URL is not configured.");
+  const token = localStorage.getItem("aiqa_access_token");
 
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   if (!response.ok) {

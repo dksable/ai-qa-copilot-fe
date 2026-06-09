@@ -60,10 +60,12 @@ async function generateTestCasesFromBackend(
 
   let response: Response;
   try {
+    const token = localStorage.getItem("aiqa_access_token");
     response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/generate-testcases`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(input),
       signal: controller.signal,
