@@ -14,7 +14,7 @@ export function SidebarMenu({
   onNavigate: (view: ActiveView) => void;
 }) {
   return (
-    <nav className={compact ? "space-y-1 p-3" : "flex-1 space-y-1 overflow-y-auto p-3"}>
+    <nav className={compact ? "space-y-1.5 p-4" : "flex-1 space-y-1.5 overflow-y-auto p-4"}>
       {NAV_ITEMS.map(({ label, value, icon: Icon, description }) => (
         <button
           key={value}
@@ -22,8 +22,8 @@ export function SidebarMenu({
           onClick={() => onNavigate(value)}
           className={cn(
             compact
-              ? "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors"
-              : "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              ? "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition-colors"
+              : "group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             activeView === value
               ? "bg-primary/12 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--primary)_35%,transparent)]"
               : "text-muted-foreground hover:bg-surface/70 hover:text-foreground",

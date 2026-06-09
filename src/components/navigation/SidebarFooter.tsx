@@ -10,7 +10,7 @@ export function SidebarFooter({
   isCollapsed?: boolean;
 }) {
   return (
-    <div className="border-t border-border/40 p-3">
+    <div className="border-t border-border/40 p-4">
       <UserProfile auth={auth} isCollapsed={isCollapsed} />
     </div>
   );

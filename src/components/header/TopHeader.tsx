@@ -35,11 +35,11 @@ export function TopHeader({
   return (
     <header
       className={cn(
-        "fixed left-0 right-0 top-0 z-30 border-b border-border/40 bg-background/70 backdrop-blur-xl transition-[padding] duration-300",
+        "fixed left-0 right-0 top-0 z-30 border-b border-border/40 bg-background/75 backdrop-blur-xl transition-[padding] duration-300",
         isCollapsed ? "lg:pl-20" : "lg:pl-72",
       )}
     >
-      <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
+      <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-10">
         <Button
           type="button"
           variant="outline"
@@ -53,8 +53,8 @@ export function TopHeader({
 
         <div className="hidden min-w-0 flex-1 md:block" />
 
-        <div className="ml-auto flex items-center gap-2">
-          <Button type="button" variant="outline" size="icon" className="size-9" aria-label="Notifications">
+        <div className="ml-auto flex items-center gap-2.5">
+          <Button type="button" variant="outline" size="icon" className="size-10" aria-label="Notifications">
             <Bell className="size-4" />
           </Button>
           <Button
@@ -64,14 +64,14 @@ export function TopHeader({
             onClick={onToggleTheme}
             aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
             title={`Switch to ${isDark ? "light" : "dark"} mode`}
-            className="size-9"
+            className="size-10"
           >
             {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
           {auth ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" className="h-9 gap-2 px-3">
+                <Button type="button" variant="outline" className="h-10 gap-2.5 px-3.5">
                   <UserCircle className="size-4" />
                   <span className="text-sm">{auth.user.fullName?.split(" ")[0] ?? "User"}</span>
                   <ChevronDown className="size-3.5 text-muted-foreground" />
@@ -89,7 +89,7 @@ export function TopHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button type="button" className="h-9 bg-gradient-primary text-primary-foreground" onClick={onLogin}>
+            <Button type="button" className="h-10 bg-gradient-primary text-primary-foreground" onClick={onLogin}>
               Login
             </Button>
           )}

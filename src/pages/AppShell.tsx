@@ -509,11 +509,11 @@ export default function AppShell() {
 
       <main
         className={cn(
-          "relative min-h-screen px-4 pb-16 pt-24 transition-[padding] duration-300 sm:px-6 lg:pt-24",
-          isSidebarCollapsed ? "lg:pl-28 lg:pr-8" : "lg:pl-80 lg:pr-8",
+          "relative min-h-screen px-4 pb-20 pt-24 transition-[padding] duration-300 sm:px-6 md:pb-24 lg:pt-28",
+          isSidebarCollapsed ? "lg:pl-28 lg:pr-10" : "lg:pl-80 lg:pr-10",
         )}
       >
-        <div className="mx-auto max-w-[1480px]">
+        <div className="mx-auto max-w-[1480px] space-y-8">
         {isAuthenticated && !["landing", "login", "signup", "forgot-password", "reset-password"].includes(activeView) && (
           <TrialBanner
             trial={workspaceUsage?.trial ?? subscription?.trial ?? null}
@@ -591,7 +591,7 @@ export default function AppShell() {
           <>
             <Hero />
 
-            <section className="mt-12 grid gap-6 lg:grid-cols-[1.05fr_1fr]">
+            <section className="mt-14 grid gap-8 lg:grid-cols-[1.05fr_1fr]">
               <GeneratorCard
                 requirement={requirement}
                 testType={testType}
@@ -620,7 +620,7 @@ export default function AppShell() {
               <FeatureGrid />
             </section>
 
-            <section className="mt-10">
+            <section className="mt-12">
               {isGenerating && <ResultSkeleton />}
               {plan && (
                 <Results
@@ -4671,7 +4671,7 @@ function AIChatPage({
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-4">
           <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
             <div className="mb-4 flex items-center justify-between">
@@ -4776,7 +4776,7 @@ function AIChatPage({
           </Card>
         </div>
 
-        <Card className="flex min-h-[720px] flex-col border-border/50 bg-card/70 backdrop-blur-xl shadow-card">
+        <Card className="flex min-h-[720px] min-w-0 flex-col overflow-hidden border-border/60 bg-card/70 backdrop-blur-xl shadow-card">
           {!hasContext ? (
             <div className="flex flex-1 items-center justify-center p-10 text-center">
               <div>
@@ -4822,7 +4822,7 @@ function AIChatPage({
                 </div>
               </div>
 
-              <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="min-w-0 flex-1 space-y-5 overflow-y-auto p-5 md:p-6">
                 {!activeChat?.messages.length ? (
                   <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
                     <Bot className="mx-auto size-8 text-muted-foreground" />
@@ -4852,19 +4852,19 @@ function AIChatPage({
                 )}
               </div>
 
-              <div className="border-t border-border/40 p-5">
-                <div className="flex gap-3">
+              <div className="border-t border-border/40 p-5 md:p-6">
+                <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
                   <Textarea
                     value={message}
                     onChange={(event) => onMessageChange(event.target.value)}
                     placeholder="Ask AI about this requirement..."
-                    className="min-h-[72px] resize-none border-border/60 bg-input/40"
+                    className="min-h-[72px] flex-1 resize-none border-border/60 bg-input/40"
                     onKeyDown={(event) => {
                       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) onSend();
                     }}
                   />
                   <Button
-                    className="self-end bg-gradient-primary text-primary-foreground shadow-glow"
+                    className="self-end bg-gradient-primary text-primary-foreground shadow-glow sm:shrink-0"
                     disabled={isLoading || !message.trim()}
                     onClick={() => onSend()}
                   >
@@ -4889,13 +4889,13 @@ function ChatBubble({ message }: { message: { role: "user" | "assistant"; conten
   };
 
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("flex min-w-0", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[86%] rounded-lg border p-4 text-sm",
+          "min-w-0 max-w-[92%] overflow-hidden rounded-xl border p-4 text-sm shadow-sm md:max-w-[86%] md:p-5",
           isUser
             ? "border-primary/40 bg-primary/10"
-            : "border-border/40 bg-surface/50",
+            : "border-border/60 bg-surface/50",
         )}
       >
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -4916,7 +4916,9 @@ function ChatBubble({ message }: { message: { role: "user" | "assistant"; conten
             </div>
           )}
         </div>
-        <MarkdownLite content={message.content} />
+        <div className="min-w-0 overflow-hidden">
+          <MarkdownLite content={message.content} />
+        </div>
       </div>
     </div>
   );
@@ -4925,12 +4927,12 @@ function ChatBubble({ message }: { message: { role: "user" | "assistant"; conten
 function MarkdownLite({ content }: { content: string }) {
   const blocks = content.split(/```/);
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-4">
       {blocks.map((block, index) => {
         if (index % 2 === 1) {
           const code = block.replace(/^[a-zA-Z]+\n/, "");
           return (
-            <div key={index} className="overflow-hidden rounded-md border border-border/40 bg-[oklch(0.14_0.02_260)]">
+            <div key={index} className="min-w-0 overflow-hidden rounded-lg border border-border/50 bg-[oklch(0.14_0.02_260)]">
               <div className="flex justify-end border-b border-border/40 px-2 py-1">
                 <Button
                   variant="ghost"
@@ -4944,14 +4946,14 @@ function MarkdownLite({ content }: { content: string }) {
                   Copy code
                 </Button>
               </div>
-              <pre className="overflow-auto p-3 font-mono text-xs text-foreground/90">
+              <pre className="max-w-full overflow-x-auto p-4 font-mono text-xs leading-5 text-foreground/90">
                 <code>{code}</code>
               </pre>
             </div>
           );
         }
         return (
-          <div key={index} className="whitespace-pre-wrap leading-relaxed">
+          <div key={index} className="max-w-full whitespace-pre-wrap break-words leading-7 [overflow-wrap:anywhere]">
             {block}
           </div>
         );

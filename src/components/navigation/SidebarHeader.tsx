@@ -19,7 +19,7 @@ export function SidebarHeader({
       {(!isCollapsed || mobile) && (
         <div className="min-w-0">
           <p className="truncate font-display text-base font-semibold">AI QA Copilot</p>
-          <p className="truncate text-xs text-muted-foreground">Enterprise QA intelligence</p>
+          <p className="truncate text-xs leading-5 text-muted-foreground">Enterprise QA intelligence</p>
         </div>
       )}
       {onToggleCollapsed && (
@@ -28,7 +28,7 @@ export function SidebarHeader({
           variant="ghost"
           size="icon"
           onClick={onToggleCollapsed}
-          className="ml-auto size-8"
+          className="ml-auto size-9"
           aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {isCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
