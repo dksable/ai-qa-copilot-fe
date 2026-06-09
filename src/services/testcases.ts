@@ -1,11 +1,11 @@
 import {
   generateRegressionImpactAnalysis,
   type RegressionImpactAnalysis,
-} from "@/lib/api/regressionImpact";
+} from "@/services/regressionImpact";
 import {
   generateTestCoverageScoreAnalysis,
   type TestCoverageScoreAnalysis,
-} from "@/lib/api/coverageScore";
+} from "@/services/coverageScore";
 
 export interface TestCase {
   id: string;

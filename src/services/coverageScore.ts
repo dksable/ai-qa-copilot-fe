@@ -1,4 +1,4 @@
-import type { TestCase, TestDataItem } from "@/lib/api/testcases";
+import type { TestCase, TestDataItem } from "@/services/testcases";
 
 export type CoverageStatus = "Covered" | "Partial" | "Missing";
 export type OverallCoverageStatus = "Excellent" | "Good" | "Fair" | "Poor";

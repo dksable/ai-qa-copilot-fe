@@ -1,4 +1,4 @@
-import type { TestFocus, TestPlan } from "@/lib/api/testcases";
+import type { TestFocus, TestPlan } from "@/services/testcases";
 
 export type ProjectDomain = "Banking" | "Healthcare" | "E-commerce" | "SaaS" | "Education" | "Custom";
 export type EntityStatus = "Active" | "Archived";
@@ -27,7 +27,7 @@ export type ReviewAction =
   | "Rejected"
   | "Comment Added"
   | "Exported Approved Version";
-export type AuthProvider = "email" | "google";
+export type AuthProvider = "email";
 export type UserStatus = "Active" | "Inactive" | "Suspended";
 
 export interface ProjectSummary {
@@ -116,7 +116,6 @@ export interface AuthUser {
   fullName: string;
   name: string;
   email: string;
-  googleId?: string;
   avatar?: string;
   authProvider: AuthProvider;
   role: WorkspaceRole;
@@ -636,8 +635,6 @@ export const projectApi = {
     apiRequest<AuthResponse>("/api/auth/signup", { method: "POST", body: JSON.stringify(input) }),
   login: (input: { email: string; password: string }) =>
     apiRequest<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(input) }),
-  googleLogin: (input: { email: string; fullName: string; googleId?: string; avatar?: string; credential?: string }) =>
-    apiRequest<AuthResponse>("/api/auth/google", { method: "POST", body: JSON.stringify(input) }),
   logout: () => apiRequest<void>("/api/auth/logout", { method: "POST" }),
   me: () => apiRequest<AuthContextResponse>("/api/auth/me"),
   forgotPassword: (email: string) =>
