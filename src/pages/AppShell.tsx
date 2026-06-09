@@ -133,6 +133,14 @@ import {
   type Plan,
   type PlanId,
   type SubscriptionResponse,
+  type ApprovedTestCaseVersion,
+  type CreateTestRunInput,
+  type TestExecution,
+  type TestExecutionDashboard,
+  type TestExecutionHistoryItem,
+  type TestExecutionStatus,
+  type TestRunDetail,
+  type TestRunSummary,
   type WorkspaceUsageResponse,
   type TestCaseHistoryCompare,
   type TestCaseHistoryRecord,
@@ -160,14 +168,6 @@ interface AnalyticsBundle {
   aiUsage: AnalyticsAIUsage;
   exports: AnalyticsExports;
 }
-
-const EXAMPLE = `As a registered user, I want to reset my password via email so that I can regain access to my account if I forget my credentials.
-
-Acceptance Criteria:
-- User can request a reset link from the login page
-- Reset link expires after 30 minutes
-- Password must be at least 8 chars with one number and one symbol
-- User receives confirmation email after successful reset`;
 
 export default function AppShell() {
   const { theme, toggleTheme } = usePersistentTheme();
@@ -204,6 +204,13 @@ export default function AppShell() {
   const [reviewQueue, setReviewQueue] = useState<TestCaseHistoryRecord[]>([]);
   const [reviewDetail, setReviewDetail] = useState<ReviewDetail | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
+  const [testRuns, setTestRuns] = useState<TestRunSummary[]>([]);
+  const [selectedTestRunId, setSelectedTestRunId] = useState("");
+  const [testRunDetail, setTestRunDetail] = useState<TestRunDetail | null>(null);
+  const [approvedExecutionVersions, setApprovedExecutionVersions] = useState<ApprovedTestCaseVersion[]>([]);
+  const [executionDashboard, setExecutionDashboard] = useState<TestExecutionDashboard | null>(null);
+  const [executionHistoryItems, setExecutionHistoryItems] = useState<TestExecutionHistoryItem[]>([]);
+  const [isExecutionLoading, setIsExecutionLoading] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
@@ -279,6 +286,27 @@ export default function AppShell() {
       toast.error(error instanceof Error ? error.message : "Failed to load review queue");
     } finally {
       setIsReviewLoading(false);
+    }
+  };
+
+  const refreshExecution = async (testRunId = selectedTestRunId) => {
+    try {
+      setIsExecutionLoading(true);
+      const [runs, dashboardData, approvedVersions] = await Promise.all([
+        projectApi.listTestRuns(),
+        projectApi.getTestExecutionDashboard(),
+        projectApi.listApprovedTestCaseVersions(),
+      ]);
+      setTestRuns(runs);
+      setExecutionDashboard(dashboardData);
+      setApprovedExecutionVersions(approvedVersions);
+      const nextRunId = testRunId || runs[0]?.id || "";
+      setSelectedTestRunId(nextRunId);
+      setTestRunDetail(nextRunId ? await projectApi.getTestRun(nextRunId) : null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load test execution");
+    } finally {
+      setIsExecutionLoading(false);
     }
   };
 
@@ -362,6 +390,7 @@ export default function AppShell() {
     void refreshExportHistory();
     void refreshChatHistory();
     void refreshReviewQueue();
+    void refreshExecution("");
     void refreshWorkspace("");
     void refreshAnalytics({});
     void refreshPricing();
@@ -613,7 +642,6 @@ export default function AppShell() {
                   setSelectedRequirementId("");
                 }}
                 onRequirementSelect={setSelectedRequirementId}
-                onLoadExample={() => setRequirement(EXAMPLE)}
                 onGenerate={onGenerate}
               />
 
@@ -778,6 +806,67 @@ export default function AppShell() {
               toast.success("Comment added");
               setReviewDetail(await projectApi.getReviewDetail(historyId));
             }}
+          />
+        ) : activeView === "execution" ? (
+          <TestExecutionPage
+            projects={projects}
+            projectDetail={projectDetail}
+            selectedProjectId={selectedProjectId}
+            selectedModuleId={selectedModuleId}
+            selectedRequirementId={selectedRequirementId}
+            testRuns={testRuns}
+            selectedTestRunId={selectedTestRunId}
+            detail={testRunDetail}
+            approvedVersions={approvedExecutionVersions}
+            dashboard={executionDashboard}
+            historyItems={executionHistoryItems}
+            isLoading={isExecutionLoading}
+            currentUserName={auth?.user.fullName ?? "Current User"}
+            onProjectChange={(projectId) => {
+              setSelectedProjectId(projectId);
+              setSelectedModuleId("");
+              setSelectedRequirementId("");
+            }}
+            onModuleChange={(moduleId) => {
+              setSelectedModuleId(moduleId);
+              setSelectedRequirementId("");
+            }}
+            onRequirementChange={setSelectedRequirementId}
+            onRefresh={() => refreshExecution(selectedTestRunId)}
+            onCreateRun={async (input) => {
+              const run = await projectApi.createTestRun(input);
+              toast.success("Test run created");
+              await refreshExecution(run.id);
+            }}
+            onSelectRun={async (runId) => {
+              setSelectedTestRunId(runId);
+              setTestRunDetail(await projectApi.getTestRun(runId));
+              setExecutionHistoryItems([]);
+            }}
+            onDeleteRun={async (runId) => {
+              if (!window.confirm("Delete this test run?")) return;
+              await projectApi.deleteTestRun(runId);
+              toast.success("Test run deleted");
+              await refreshExecution("");
+            }}
+            onUpdateExecution={async (execution, status, actualResult, comments, bugId) => {
+              await projectApi.updateTestExecutionStatus(execution.id, {
+                status,
+                actualResult,
+                comments,
+                bugId,
+                updatedBy: auth?.user.fullName ?? "Current User",
+              });
+              toast.success("Execution updated");
+              if (selectedTestRunId) setTestRunDetail(await projectApi.getTestRun(selectedTestRunId));
+              setExecutionDashboard(await projectApi.getTestExecutionDashboard());
+            }}
+            onLoadExecutionHistory={async (executionId) => {
+              setExecutionHistoryItems(await projectApi.getTestExecutionHistory(executionId));
+            }}
+            onExportRun={(runId, format) =>
+              runExport(format === "excel" ? "Excel" : "PDF", () => projectApi.exportTestRunReport(runId, format))
+            }
           />
         ) : activeView === "chat" ? (
           <AIChatPage
@@ -1101,7 +1190,6 @@ function GeneratorCard({
   onProjectChange,
   onModuleChange,
   onRequirementSelect,
-  onLoadExample,
   onGenerate,
 }: {
   requirement: string;
@@ -1117,7 +1205,6 @@ function GeneratorCard({
   onProjectChange: (value: string) => void;
   onModuleChange: (value: string) => void;
   onRequirementSelect: (value: string) => void;
-  onLoadExample: () => void;
   onGenerate: () => void;
 }) {
   const modules = projectDetail?.modules.filter((moduleItem) => moduleItem.status === "Active") ?? [];
@@ -1131,14 +1218,6 @@ function GeneratorCard({
           <Wand2 className="size-4 text-primary" />
           <h2 className="text-base font-semibold">Input</h2>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onLoadExample}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          Load example
-        </Button>
       </div>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
@@ -2920,7 +2999,7 @@ function AuthPage({
           </Button>
           {resetLink && (
             <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-sm">
-              Demo reset link: <span className="font-mono">{resetLink}</span>
+              Reset link: <span className="font-mono">{resetLink}</span>
             </div>
           )}
         </div>
@@ -3009,49 +3088,167 @@ function LandingPage({
   onPricing: () => void;
 }) {
   const heroFeatures = [
-    { icon: Wand2, label: "AI Test Case Generation" },
-    { icon: Bot, label: "AI Chat with Requirement" },
-    { icon: Gauge, label: "Test Coverage Analysis" },
-    { icon: ClipboardList, label: "Review & Approval Workflow" },
+    { icon: Sparkles, label: "AI-powered QA lifecycle platform" },
+    { icon: ClipboardCheck, label: "Manual and automated QA readiness" },
+    { icon: Gauge, label: "Coverage, governance, and analytics" },
+    { icon: Code2, label: "Repository integrations planned" },
   ];
   const painPoints = [
     "Manual test case creation",
-    "Coverage gaps",
+    "Poor coverage visibility",
     "Requirement changes",
-    "Review bottlenecks",
-    "Scattered QA documentation",
+    "Scattered QA assets",
+    "Review delays",
+    "Lack of execution visibility",
   ];
   const features = [
-    ["AI Test Case Generation", "Generate positive, negative, edge, API, UI, and regression scenarios."],
-    ["AI Chat with Requirement", "Ask context-aware QA questions against selected requirements and versions."],
-    ["Test Coverage Score", "Quantify coverage and surface missing areas before release."],
-    ["Requirement Change Impact Analysis", "Understand what must be retested when requirements evolve."],
-    ["Project Management", "Organize QA work by workspace, project, module, and requirement."],
-    ["Test Case History", "Version every generated output with status, model, and author metadata."],
-    ["Review Workflow", "Submit, approve, reject, and lock official versions."],
-    ["Team Collaboration", "Invite members, assign roles, and manage project access."],
-    ["Analytics Dashboard", "Track coverage, productivity, review queues, exports, and AI usage."],
-    ["Jira Integration", "Coming soon for issue sync and traceability."],
+    {
+      title: "AI Test Case Generation",
+      description: "Generate positive, negative, edge, API, UI, and regression scenarios.",
+      icon: Wand2,
+    },
+    {
+      title: "AI Chat with Requirement",
+      description: "Ask context-aware QA questions against selected requirements and versions.",
+      icon: Bot,
+    },
+    {
+      title: "Test Coverage Score",
+      description: "Quantify coverage and surface missing areas before release.",
+      icon: Gauge,
+    },
+    {
+      title: "Requirement Change Impact Analysis",
+      description: "Understand what must be retested when requirements evolve.",
+      icon: GitCompare,
+    },
+    {
+      title: "Project Management",
+      description: "Organize QA work by workspace, project, module, and requirement.",
+      icon: FolderKanban,
+    },
+    {
+      title: "Test Case History",
+      description: "Version every generated output with status, model, and author metadata.",
+      icon: History,
+    },
+    {
+      title: "Review Workflow",
+      description: "Submit, approve, reject, and lock official versions.",
+      icon: ClipboardList,
+    },
+    {
+      title: "Manual Test Execution",
+      description: "Create test runs, execute approved test cases, track Pass/Fail/Blocked/Skipped status, and generate detailed execution reports.",
+      icon: ClipboardCheck,
+    },
+    {
+      title: "Team Collaboration",
+      description: "Invite members, assign roles, and manage project access.",
+      icon: Users,
+    },
+    {
+      title: "Analytics Dashboard",
+      description: "Track coverage, productivity, review queues, exports, and AI usage.",
+      icon: BarChart3,
+    },
+    {
+      title: "Jira Integration",
+      description: "Coming soon for issue sync and traceability.",
+      icon: Rocket,
+      comingSoon: true,
+    },
+    {
+      title: "GitHub/Bitbucket Integration",
+      description: "Coming soon to create Playwright files and Pull Requests from generated tests.",
+      icon: Code2,
+      comingSoon: true,
+    },
   ];
-  const screenshots = [
-    { title: "Dashboard", metric: "86%", caption: "Coverage and workflow KPIs" },
-    { title: "AI Chat", metric: "12", caption: "Context-aware QA suggestions" },
-    { title: "Project Management", metric: "48", caption: "Requirements and versions" },
-    { title: "Analytics", metric: "+31%", caption: "Team productivity insights" },
+  const whyChoose = [
+    {
+      title: "Faster Test Design",
+      description: "Reduce repetitive QA documentation effort and help teams move from requirements to test coverage faster.",
+      icon: Rocket,
+    },
+    {
+      title: "Better Test Coverage",
+      description: "Expose missing scenarios earlier so teams can improve confidence before development and release gates.",
+      icon: Gauge,
+    },
+    {
+      title: "End-to-End QA Governance",
+      description: "Bring generation, review, approval, versioning, execution, and reporting into one controlled flow.",
+      icon: ShieldCheck,
+    },
+    {
+      title: "Manual + Automation Ready",
+      description: "Support today’s manual execution needs while preparing teams for Playwright automation workflows.",
+      icon: ClipboardCheck,
+    },
+    {
+      title: "Team Collaboration",
+      description: "Give QA engineers, leads, managers, and stakeholders one shared workspace for quality work.",
+      icon: Users,
+    },
+    {
+      title: "Management Visibility",
+      description: "Make coverage, review progress, execution status, and team activity easier to track and communicate.",
+      icon: BarChart3,
+    },
   ];
-  const benefits = [
-    "80% Faster Test Design",
-    "Better Test Coverage",
-    "Faster Releases",
-    "Improved QA Productivity",
-    "Reduced Manual Effort",
+  const workflowSteps = [
+    {
+      title: "Requirement",
+      description: "Capture user stories",
+    },
+    {
+      title: "AI Test Generation",
+      description: "Create structured QA coverage",
+    },
+    {
+      title: "Review & Approval",
+      description: "Govern versions and approvals",
+    },
+    {
+      title: "Manual Test Execution",
+      description: "Run tests and track outcomes",
+    },
+    {
+      title: "Playwright Test Generation",
+      description: "Prepare automation skeletons",
+    },
+    {
+      title: "GitHub/Bitbucket Pull Request",
+      description: "Planned repo-ready PR workflow",
+    },
+    {
+      title: "Analytics & Reports",
+      description: "Measure coverage and progress",
+    },
+  ];
+  const integrations = [
+    { title: "Jira Integration", description: "Issue traceability and QA workflow sync.", icon: Rocket, status: "Coming Soon" },
+    { title: "GitHub Repository", description: "Generate Playwright files and Pull Requests.", icon: Code2, status: "Coming Soon" },
+    { title: "Bitbucket Repository", description: "Connect automation repos and branch workflows.", icon: GitCompare, status: "Coming Soon" },
+    { title: "Azure DevOps", description: "Enterprise delivery workflow support.", icon: Boxes, status: "Future" },
+    { title: "CI/CD Pipeline", description: "Automation execution and release pipeline signals.", icon: TrendingUp, status: "Future" },
+  ];
+  const businessValue = [
+    "Reduce manual test design effort",
+    "Improve coverage quality",
+    "Accelerate QA cycles",
+    "Improve release confidence",
+    "Centralize QA assets",
+    "Enable better management reporting",
   ];
   const faqs = [
-    ["What is AI QA Copilot?", "AI QA Copilot is an AI-powered QA platform for generating, managing, reviewing, and analyzing test assets from requirements."],
-    ["How does AI generate test cases?", "The platform analyzes requirement text, acceptance criteria, selected project context, and existing versions to produce structured QA scenarios."],
-    ["Is Jira supported?", "Jira integration is planned and marked as coming soon for issue traceability and workflow sync."],
-    ["Can teams collaborate?", "Yes. Team workspaces support roles, members, project assignments, review queues, and shared analytics."],
-    ["Is my data secure?", "The product is designed for enterprise controls, workspace-level access, role-based permissions, and governed approval flows."],
+    ["What is AI QA Copilot?", "AI QA Copilot is an AI-powered QA lifecycle platform for test design, review, execution, collaboration, analytics, and reporting."],
+    ["Can it generate Playwright tests?", "Yes. The product generates Playwright test skeletons today, with repository Pull Request workflows planned for GitHub and Bitbucket."],
+    ["Can teams collaborate?", "Yes. Workspaces, roles, project access, review queues, and shared analytics support team-based QA work."],
+    ["Does it support manual execution?", "Yes. Teams can create test runs, execute approved test cases, and track Passed, Failed, Blocked, Skipped, and Not Executed status."],
+    ["Will it support Jira/GitHub/Bitbucket?", "Jira, GitHub, and Bitbucket are positioned as upcoming enterprise integrations for traceability and automation repository workflows."],
+    ["Is it suitable for enterprise QA teams?", "Yes. The product is designed around governed workflows, role-based access, approval controls, analytics, and scalable QA asset management."],
   ];
 
   return (
@@ -3062,10 +3259,10 @@ function LandingPage({
             <Sparkles className="mr-1 size-3" /> Enterprise QA Intelligence
           </Badge>
           <h1 className="max-w-4xl font-display text-4xl font-bold leading-tight md:text-6xl">
-            AI-Powered Test Design & QA Management Platform
+            AI-Powered QA Lifecycle Platform
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">
-            Generate test cases, improve coverage, manage QA workflows, and accelerate software delivery with AI.
+            Generate better test cases, govern QA workflows, execute manual tests, prepare Playwright automation, and give leaders clear quality visibility.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button size="lg" className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onStart}>
@@ -3091,25 +3288,12 @@ function LandingPage({
         <LandingProductMockup />
       </section>
 
-      <section className="space-y-5">
-        <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Future-ready for customer logos
-        </p>
-        <div className="grid gap-3 md:grid-cols-4">
-          {["Enterprise Company 1", "Enterprise Company 2", "Enterprise Company 3", "Enterprise Company 4"].map((logo) => (
-            <div key={logo} className="rounded-lg border border-border/40 bg-card/50 p-5 text-center text-sm font-semibold text-muted-foreground">
-              {logo}
-            </div>
-          ))}
-        </div>
-      </section>
-
       <LandingSection
         eyebrow="The Problem"
-        title="QA Teams Waste Hours Creating and Managing Test Cases"
-        description="Manual QA design slows release cycles and leaves teams guessing where coverage, review, and documentation gaps are hiding."
+        title="QA Teams Need More Than Faster Documentation"
+        description="Enterprise QA teams are expected to move quickly while managing changing requirements, distributed teams, approval gates, and release risk."
       >
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           {painPoints.map((point) => (
             <div key={point} className="rounded-lg border border-border/40 bg-card/60 p-4">
               <AlertTriangle className="mb-3 size-4 text-warning" />
@@ -3120,28 +3304,77 @@ function LandingPage({
       </LandingSection>
 
       <LandingSection
-        eyebrow="The Solution"
-        title="Meet AI QA Copilot"
-        description="A governed workflow that converts requirement text into review-ready test assets and management-friendly quality insight."
+        eyebrow="Core Features"
+        title="What AI QA Copilot Can Do"
+        description="A complete QA lifecycle platform for generating test assets, managing review, executing tests, collaborating across teams, and preparing for automation workflows."
       >
-        <div className="grid gap-3 md:grid-cols-5">
-          {["Requirement", "AI QA Copilot", "Generate Test Cases", "Review & Approval", "Export & Share"].map((step, index) => (
-            <div key={step} className="relative rounded-lg border border-border/40 bg-card/60 p-5 text-center">
-              <div className="mx-auto mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-sm font-semibold text-primary">
-                {index + 1}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {features.map(({ title, description, icon: Icon, comingSoon }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
+              <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Icon className="size-4" />
               </div>
-              <p className="text-sm font-semibold">{step}</p>
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-sm font-semibold">{title}</h3>
+                {comingSoon && <Badge variant="outline" className="shrink-0 text-[10px]">Coming Soon</Badge>}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
             </div>
           ))}
         </div>
       </LandingSection>
 
-      <LandingSection eyebrow="Features" title="Everything QA Teams Need to Move Faster" description="From AI generation to approvals, exports, collaboration, and analytics.">
+      <LandingSection
+        eyebrow="Why Choose AI QA Copilot"
+        title="Built for QA Leaders, Engineering Managers, and Delivery Teams"
+        description="Move from isolated test documents to governed quality operations with clear ownership, stronger confidence, and management-ready visibility."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {whyChoose.map(({ title, description, icon: Icon }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5">
+              <Icon className="mb-4 size-5 text-primary" />
+              <h3 className="font-semibold">{title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="How It Works"
+        title="A Simple Path From Requirement to Quality Insight"
+        description="AI QA Copilot connects the key stages of test design, review, execution, automation readiness, and reporting without forcing teams into fragmented tools."
+      >
+        <div className="rounded-lg border border-border/40 bg-card/60 p-3 md:p-4">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {workflowSteps.map((step, index) => (
+              <div key={step.title} className="relative rounded-lg border border-border/40 bg-background/50 p-3.5">
+                <div className="mb-2 flex items-start gap-2.5">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                  <h3 className="min-w-0 text-sm font-semibold leading-5">{step.title}</h3>
+                </div>
+                <p className="text-xs leading-4 text-muted-foreground">{step.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="Enterprise Integrations"
+        title="Designed to Fit Enterprise Delivery Ecosystems"
+        description="Planned integrations will connect QA planning, automation repositories, and delivery pipelines so quality work can flow into existing engineering processes."
+      >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          {features.map(([title, description], index) => (
-            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
-              <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-                {index === features.length - 1 ? <Rocket className="size-4" /> : <CheckCircle2 className="size-4" />}
+          {integrations.map(({ title, description, icon: Icon, status }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <span className="flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Icon className="size-4" />
+                </span>
+                <Badge variant="outline" className="shrink-0 text-[10px]">{status}</Badge>
               </div>
               <h3 className="text-sm font-semibold">{title}</h3>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
@@ -3150,33 +3383,16 @@ function LandingPage({
         </div>
       </LandingSection>
 
-      <LandingSection eyebrow="Product" title="Built for Real QA Workflows" description="Responsive product previews for every part of the QA lifecycle.">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {screenshots.map((item) => (
-            <div key={item.title} className="overflow-hidden rounded-lg border border-border/40 bg-card/60">
-              <div className="border-b border-border/40 bg-surface/50 p-3">
-                <p className="text-sm font-semibold">{item.title}</p>
-              </div>
-              <div className="space-y-3 p-4">
-                <div className="rounded-lg border border-border/40 bg-background/50 p-4">
-                  <p className="font-display text-3xl font-semibold">{item.metric}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{item.caption}</p>
-                </div>
-                <div className="h-2 rounded-full bg-primary/20" />
-                <div className="h-2 w-3/4 rounded-full bg-success/30" />
-                <div className="h-2 w-1/2 rounded-full bg-warning/30" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </LandingSection>
-
-      <LandingSection eyebrow="Benefits" title="Designed for Faster, Safer Releases" description="Make QA progress visible to engineers, QA leads, managers, and executives.">
-        <div className="grid gap-4 md:grid-cols-5">
-          {benefits.map((benefit) => (
-            <div key={benefit} className="rounded-lg border border-border/40 bg-card/60 p-5">
-              <TrendingUp className="mb-4 size-5 text-success" />
-              <p className="font-semibold">{benefit}</p>
+      <LandingSection
+        eyebrow="Business Value"
+        title="Turn QA Effort Into Measurable Delivery Confidence"
+        description="Give leaders a clearer view of quality readiness while helping teams reduce repetitive work and improve release decisions."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {businessValue.map((value) => (
+            <div key={value} className="flex items-start gap-3 rounded-lg border border-border/40 bg-card/60 p-5">
+              <TrendingUp className="mt-0.5 size-5 shrink-0 text-success" />
+              <p className="font-semibold">{value}</p>
             </div>
           ))}
         </div>
@@ -3208,16 +3424,18 @@ function LandingPage({
       </LandingSection>
 
       <section className="rounded-lg border border-primary/30 bg-primary/10 p-8 text-center md:p-12">
-        <h2 className="font-display text-3xl font-bold md:text-4xl">Ready to Transform Your QA Process?</h2>
+        <h2 className="font-display text-3xl font-bold md:text-4xl">
+          Move from manual QA documentation to an AI-powered QA lifecycle platform.
+        </h2>
         <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground">
-          Launch a governed AI QA workflow that teams can use for generation, review, analytics, and customer-ready reporting.
+          Help your QA and engineering teams design better tests, govern approvals, execute with visibility, and prepare for automation-ready delivery.
         </p>
         <div className="mt-7 flex justify-center gap-3">
           <Button size="lg" className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onStart}>
             Start Free Trial
           </Button>
           <Button size="lg" variant="outline" onClick={onBookDemo}>
-            Contact Sales
+            Book Demo
           </Button>
         </div>
       </section>
@@ -4596,6 +4814,484 @@ function ReviewQueuePage({
   );
 }
 
+function executionStatusClass(status: TestExecutionStatus | string) {
+  switch (status) {
+    case "Passed":
+      return "border-success/40 bg-success/10 text-success";
+    case "Failed":
+      return "border-destructive/50 bg-destructive/10 text-destructive";
+    case "Blocked":
+      return "border-warning/50 bg-warning/10 text-warning";
+    case "Skipped":
+      return "border-muted-foreground/40 bg-muted/40 text-muted-foreground";
+    case "Completed":
+      return "border-success/40 bg-success/10 text-success";
+    case "In Progress":
+      return "border-primary/40 bg-primary/10 text-primary";
+    default:
+      return "border-border/60 bg-surface/50 text-muted-foreground";
+  }
+}
+
+function TestExecutionPage({
+  projects,
+  projectDetail,
+  selectedProjectId,
+  selectedModuleId,
+  selectedRequirementId,
+  testRuns,
+  selectedTestRunId,
+  detail,
+  approvedVersions,
+  dashboard,
+  historyItems,
+  isLoading,
+  currentUserName,
+  onProjectChange,
+  onModuleChange,
+  onRequirementChange,
+  onRefresh,
+  onCreateRun,
+  onSelectRun,
+  onDeleteRun,
+  onUpdateExecution,
+  onLoadExecutionHistory,
+  onExportRun,
+}: {
+  projects: ProjectSummary[];
+  projectDetail: ProjectDetail | null;
+  selectedProjectId: string;
+  selectedModuleId: string;
+  selectedRequirementId: string;
+  testRuns: TestRunSummary[];
+  selectedTestRunId: string;
+  detail: TestRunDetail | null;
+  approvedVersions: ApprovedTestCaseVersion[];
+  dashboard: TestExecutionDashboard | null;
+  historyItems: TestExecutionHistoryItem[];
+  isLoading: boolean;
+  currentUserName: string;
+  onProjectChange: (projectId: string) => void;
+  onModuleChange: (moduleId: string) => void;
+  onRequirementChange: (requirementId: string) => void;
+  onRefresh: () => void;
+  onCreateRun: (input: CreateTestRunInput) => Promise<void>;
+  onSelectRun: (runId: string) => void;
+  onDeleteRun: (runId: string) => void;
+  onUpdateExecution: (
+    execution: TestExecution,
+    status: TestExecutionStatus,
+    actualResult: string,
+    comments: string,
+    bugId: string,
+  ) => Promise<void>;
+  onLoadExecutionHistory: (executionId: string) => void;
+  onExportRun: (runId: string, format: ExportFormat) => void;
+}) {
+  const modules = projectDetail?.modules.filter((moduleItem) => moduleItem.status === "Active") ?? [];
+  const requirements = projectDetail?.requirements.filter((item) => item.moduleId === selectedModuleId) ?? [];
+  const filteredApprovedVersions = approvedVersions.filter(
+    (version) =>
+      (!selectedProjectId || version.projectId === selectedProjectId) &&
+      (!selectedModuleId || version.moduleId === selectedModuleId) &&
+      (!selectedRequirementId || version.requirementId === selectedRequirementId),
+  );
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
+  const [form, setForm] = useState({
+    name: "",
+    environment: "QA" as const,
+    buildVersion: "",
+    assignedTester: currentUserName,
+    startDate: new Date().toISOString().slice(0, 10),
+    endDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10),
+    description: "",
+  });
+  const [executionDrafts, setExecutionDrafts] = useState<Record<string, { status: TestExecutionStatus; actualResult: string; comments: string; bugId: string }>>({});
+
+  const createRun = async () => {
+    const trimmedName = form.name.trim();
+    const trimmedBuildVersion = form.buildVersion.trim();
+    const trimmedAssignedTester = form.assignedTester.trim();
+    if (!selectedProjectId || !selectedModuleId) {
+      toast.error("Select project and module before creating a test run.");
+      return;
+    }
+    if (!trimmedName) {
+      toast.error("Enter a test run name.");
+      return;
+    }
+    if (!trimmedBuildVersion) {
+      toast.error("Enter a build version.");
+      return;
+    }
+    if (!trimmedAssignedTester) {
+      toast.error("Enter or select an assigned tester.");
+      return;
+    }
+    if (!selectedHistoryIds.length) {
+      toast.error("Select at least one approved test case version.");
+      return;
+    }
+    await onCreateRun({
+      name: trimmedName,
+      projectId: selectedProjectId,
+      moduleId: selectedModuleId,
+      requirementId: selectedRequirementId || undefined,
+      environment: form.environment,
+      buildVersion: trimmedBuildVersion,
+      assignedTester: trimmedAssignedTester,
+      startDate: form.startDate,
+      endDate: form.endDate,
+      description: form.description.trim(),
+      historyIds: selectedHistoryIds,
+    });
+    setIsCreateOpen(false);
+    setSelectedHistoryIds([]);
+    setForm((value) => ({ ...value, name: "", buildVersion: "", assignedTester: currentUserName, description: "" }));
+  };
+
+  const draftFor = (execution: TestExecution) =>
+    executionDrafts[execution.id] ?? {
+      status: execution.status,
+      actualResult: execution.actualResult,
+      comments: execution.comments,
+      bugId: execution.bugId ?? "",
+    };
+
+  const setDraft = (executionId: string, patch: Partial<{ status: TestExecutionStatus; actualResult: string; comments: string; bugId: string }>) => {
+    setExecutionDrafts((current) => ({
+      ...current,
+      [executionId]: { status: "Not Executed", actualResult: "", comments: "", bugId: "", ...current[executionId], ...patch },
+    }));
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            <ClipboardCheck className="mr-1 size-3" /> Manual execution
+          </Badge>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Test Execution</h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Create manual test runs from approved test cases, update execution results, and track QA progress.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onRefresh} disabled={isLoading}>
+            {isLoading ? <Loader2 className="size-4 animate-spin" /> : <TrendingUp className="size-4" />}
+            Refresh
+          </Button>
+          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-primary text-primary-foreground shadow-glow">
+                <Plus className="size-4" />
+                Create Test Run
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Create Test Run</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Input placeholder="Test run name" value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} />
+                <Input placeholder="Build version" value={form.buildVersion} onChange={(event) => setForm((value) => ({ ...value, buildVersion: event.target.value }))} />
+                <Select value={selectedProjectId} onValueChange={onProjectChange}>
+                  <SelectTrigger><SelectValue placeholder="Project" /></SelectTrigger>
+                  <SelectContent>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={selectedModuleId} onValueChange={onModuleChange} disabled={!selectedProjectId}>
+                  <SelectTrigger><SelectValue placeholder="Module" /></SelectTrigger>
+                  <SelectContent>{modules.map((moduleItem) => <SelectItem key={moduleItem.id} value={moduleItem.id}>{moduleItem.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={selectedRequirementId || "all"} onValueChange={(value) => onRequirementChange(value === "all" ? "" : value)} disabled={!selectedModuleId}>
+                  <SelectTrigger><SelectValue placeholder="Requirement optional" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All requirements</SelectItem>
+                    {requirements.map((requirement) => <SelectItem key={requirement.id} value={requirement.id}>{requirement.title}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={form.environment} onValueChange={(environment) => setForm((value) => ({ ...value, environment: environment as typeof form.environment }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{["QA", "UAT", "Staging", "Production"].map((environment) => <SelectItem key={environment} value={environment}>{environment}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input placeholder="Assigned tester" value={form.assignedTester} onChange={(event) => setForm((value) => ({ ...value, assignedTester: event.target.value }))} />
+                <Input type="date" value={form.startDate} onChange={(event) => setForm((value) => ({ ...value, startDate: event.target.value }))} />
+                <Input type="date" value={form.endDate} onChange={(event) => setForm((value) => ({ ...value, endDate: event.target.value }))} />
+                <Textarea className="md:col-span-2" placeholder="Description" value={form.description} onChange={(event) => setForm((value) => ({ ...value, description: event.target.value }))} />
+              </div>
+              <div className="rounded-xl border border-border/50 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="font-medium">Approved test case versions</p>
+                  <Badge variant="outline">{selectedHistoryIds.length} selected</Badge>
+                </div>
+                <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
+                  {filteredApprovedVersions.length ? filteredApprovedVersions.map((version) => (
+                    <button
+                      key={version.id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedHistoryIds((current) =>
+                          current.includes(version.id) ? current.filter((id) => id !== version.id) : [...current, version.id],
+                        )
+                      }
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-lg border p-3 text-left text-sm",
+                        selectedHistoryIds.includes(version.id) ? "border-primary/50 bg-primary/10" : "border-border/40 bg-surface/40",
+                      )}
+                    >
+                      <span>
+                        <span className="font-medium">{version.requirementTitle}</span>
+                        <span className="block text-xs text-muted-foreground">Version {version.version} / {version.totalTestCases} cases / {version.coverageScore}% coverage</span>
+                      </span>
+                      <Badge variant="outline" className={cn("text-xs", executionStatusClass(version.reviewStatus))}>{version.reviewStatus}</Badge>
+                    </button>
+                  )) : (
+                    <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                      No approved test case versions found for the selected filters.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <Button onClick={createRun} className="bg-gradient-primary text-primary-foreground">Create Test Run</Button>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      <Tabs defaultValue="runs" className="space-y-5">
+        <TabsList>
+          <TabsTrigger value="runs">Test Runs</TabsTrigger>
+          <TabsTrigger value="dashboard">Execution Dashboard</TabsTrigger>
+          <TabsTrigger value="history">Execution History</TabsTrigger>
+        </TabsList>
+        <TabsContent value="runs" className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
+            {detail && [
+              ["Total", detail.totalTestCases],
+              ["Passed", detail.passed],
+              ["Failed", detail.failed],
+              ["Blocked", detail.blocked],
+              ["Skipped", detail.skipped],
+              ["Not Executed", detail.notExecuted],
+              ["Pass Rate", `${detail.passRate}%`],
+            ].map(([label, value]) => (
+              <Card key={label} className="app-card p-4">
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="mt-2 font-display text-2xl font-semibold">{value}</p>
+              </Card>
+            ))}
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+            <Card className="app-card p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-semibold">Test Runs</h2>
+                <Badge variant="outline">{testRuns.length} runs</Badge>
+              </div>
+              <div className="space-y-3">
+                {testRuns.length ? testRuns.map((run) => (
+                  <button
+                    key={run.id}
+                    type="button"
+                    onClick={() => onSelectRun(run.id)}
+                    className={cn(
+                      "w-full rounded-xl border p-4 text-left transition-colors",
+                      selectedTestRunId === run.id ? "border-primary/50 bg-primary/10" : "border-border/50 bg-surface/40 hover:bg-surface/70",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{run.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{run.projectName} / {run.environment} / {run.buildVersion}</p>
+                      </div>
+                      <Badge variant="outline" className={executionStatusClass(run.status)}>{run.status}</Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-5 gap-2 text-xs text-muted-foreground">
+                      <span>P {run.passed}</span><span>F {run.failed}</span><span>B {run.blocked}</span><span>S {run.skipped}</span><span>NE {run.notExecuted}</span>
+                    </div>
+                    <Progress value={run.progress} className="mt-3 h-2" />
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); onSelectRun(run.id); }}>Start Execution</Button>
+                      <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); onExportRun(run.id, "pdf"); }}>PDF</Button>
+                      <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); onDeleteRun(run.id); }}><Trash2 className="size-4" /></Button>
+                    </div>
+                  </button>
+                )) : (
+                  <p className="rounded-xl border border-dashed border-border/50 p-8 text-center text-sm text-muted-foreground">
+                    No test runs yet. Create a run from approved test cases.
+                  </p>
+                )}
+              </div>
+            </Card>
+
+            <Card className="app-card p-5">
+              {detail ? (
+                <div className="space-y-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-semibold">{detail.name}</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">{detail.moduleName} / {detail.assignedTester}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => onExportRun(detail.id, "excel")}><Download className="size-4" />Excel</Button>
+                      <Button size="sm" variant="outline" onClick={() => onExportRun(detail.id, "pdf")}><Download className="size-4" />PDF</Button>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {detail.executions.map((execution) => {
+                      const draft = draftFor(execution);
+                      return (
+                        <div key={execution.id} className="rounded-xl border border-border/50 bg-surface/35 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{execution.testCaseId}</p>
+                              <p className="mt-1 font-semibold">{execution.title}</p>
+                              <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{execution.description}</p>
+                              <p className="mt-2 text-sm"><span className="text-muted-foreground">Expected:</span> {execution.expectedResult}</p>
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                              <Badge variant="outline" className={priorityClass(execution.priority)}>{execution.priority}</Badge>
+                              <Badge variant="outline" className={executionStatusClass(execution.status)}>{execution.status}</Badge>
+                            </div>
+                          </div>
+                          <div className="mt-4 grid grid-cols-12 gap-3">
+                            <div className="col-span-12 min-w-0 md:col-span-4 2xl:col-span-2">
+                              <Select value={draft.status} onValueChange={(status) => setDraft(execution.id, { status: status as TestExecutionStatus })}>
+                                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                                <SelectContent>{["Not Executed", "Passed", "Failed", "Blocked", "Skipped"].map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent>
+                              </Select>
+                            </div>
+                            <Input
+                              className="col-span-12 min-w-0 md:col-span-4 2xl:col-span-3"
+                              placeholder="Actual result"
+                              value={draft.actualResult}
+                              onChange={(event) => setDraft(execution.id, { actualResult: event.target.value })}
+                            />
+                            <Input
+                              className="col-span-12 min-w-0 md:col-span-4 2xl:col-span-3"
+                              placeholder="Comments"
+                              value={draft.comments}
+                              onChange={(event) => setDraft(execution.id, { comments: event.target.value })}
+                            />
+                            <Input
+                              className="col-span-12 min-w-0 md:col-span-6 2xl:col-span-2"
+                              placeholder="Bug ID"
+                              value={draft.bugId}
+                              onChange={(event) => setDraft(execution.id, { bugId: event.target.value })}
+                            />
+                            <Button
+                              className="col-span-12 md:col-span-6 2xl:col-span-2"
+                              onClick={() => onUpdateExecution(execution, draft.status, draft.actualResult, draft.comments, draft.bugId)}
+                            >
+                              Update
+                            </Button>
+                          </div>
+                          <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
+                            <span>Executed by {execution.executedBy ?? "-"}</span>
+                            <span>{execution.executedAt ? formatDate(execution.executedAt) : "Not executed"}</span>
+                            <button className="text-primary" onClick={() => onLoadExecutionHistory(execution.id)}>View history</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-border/50 p-10 text-center text-sm text-muted-foreground">
+                  Select a test run to view and update executions.
+                </p>
+              )}
+            </Card>
+          </div>
+        </TabsContent>
+        <TabsContent value="dashboard" className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            {[
+              ["Total Runs", dashboard?.totalTestRuns ?? 0],
+              ["Active", dashboard?.activeTestRuns ?? 0],
+              ["Completed", dashboard?.completedTestRuns ?? 0],
+              ["Pass Rate", `${dashboard?.passRate ?? 0}%`],
+              ["Failed", dashboard?.failedTestCases ?? 0],
+              ["Blocked", dashboard?.blockedTestCases ?? 0],
+            ].map(([label, value]) => (
+              <Card key={label} className="app-card p-4">
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="mt-2 font-display text-2xl font-semibold">{value}</p>
+              </Card>
+            ))}
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className="app-card p-5">
+              <h3 className="font-semibold">Pass vs Fail</h3>
+              <div className="mt-4 h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={dashboard?.passFailChart ?? []} dataKey="value" nameKey="name" outerRadius={90} label>
+                      {(dashboard?.passFailChart ?? []).map((_, index) => <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+            <Card className="app-card p-5">
+              <h3 className="font-semibold">Daily Execution Trend</h3>
+              <div className="mt-4 h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dashboard?.dailyExecutionTrend ?? []}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="name" />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="executions" stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.18} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          </div>
+          <Card className="app-card p-5">
+            <h3 className="font-semibold">Tester-wise Execution Summary</h3>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {(dashboard?.testerSummary ?? []).map((tester) => (
+                <div key={tester.tester} className="rounded-xl border border-border/50 bg-surface/40 p-4">
+                  <p className="font-medium">{tester.tester}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Executed {tester.total} / Passed {tester.passed} / Failed {tester.failed}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </TabsContent>
+        <TabsContent value="history">
+          <Card className="app-card p-5">
+            <h2 className="font-semibold">Execution History</h2>
+            <div className="mt-4 space-y-3">
+              {historyItems.length ? historyItems.map((item) => (
+                <div key={item.id} className="rounded-xl border border-border/50 bg-surface/40 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{item.oldStatus}</Badge>
+                    <span className="text-xs text-muted-foreground">to</span>
+                    <Badge variant="outline" className={executionStatusClass(item.newStatus)}>{item.newStatus}</Badge>
+                    <span className="ml-auto text-xs text-muted-foreground">{formatDate(item.createdAt)}</span>
+                  </div>
+                  <p className="mt-2 text-sm">Updated by {item.updatedBy}</p>
+                  {item.comment && <p className="mt-1 text-sm text-muted-foreground">{item.comment}</p>}
+                  {item.bugId && <p className="mt-1 text-xs text-muted-foreground">Bug: {item.bugId}</p>}
+                </div>
+              )) : (
+                <p className="rounded-xl border border-dashed border-border/50 p-8 text-center text-sm text-muted-foreground">
+                  Select “View history” on an execution row to see status changes.
+                </p>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
 const QUICK_CHAT_PROMPTS = [
   "What test cases are missing?",
   "Improve coverage score",
@@ -4932,11 +5628,12 @@ function MarkdownLite({ content }: { content: string }) {
         if (index % 2 === 1) {
           const code = block.replace(/^[a-zA-Z]+\n/, "");
           return (
-            <div key={index} className="min-w-0 overflow-hidden rounded-lg border border-border/50 bg-[oklch(0.14_0.02_260)]">
-              <div className="flex justify-end border-b border-border/40 px-2 py-1">
+            <div key={index} className="min-w-0 overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950">
+              <div className="flex justify-end border-b border-slate-700/80 px-2 py-1">
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="text-slate-200 hover:bg-slate-800 hover:text-white"
                   onClick={() => {
                     navigator.clipboard.writeText(code);
                     toast.success("Copied code");
@@ -4946,7 +5643,7 @@ function MarkdownLite({ content }: { content: string }) {
                   Copy code
                 </Button>
               </div>
-              <pre className="max-w-full overflow-x-auto p-4 font-mono text-xs leading-5 text-foreground/90">
+              <pre className="max-w-full overflow-x-auto p-4 font-mono text-xs leading-5 text-slate-100">
                 <code>{code}</code>
               </pre>
             </div>
@@ -5328,14 +6025,14 @@ function Results({
         </TabsContent>
 
         <TabsContent value="code" className="mt-4">
-          <div className="overflow-hidden rounded-lg border border-border/40 bg-[oklch(0.14_0.02_260)]">
-            <div className="flex items-center justify-between border-b border-border/40 px-4 py-2">
-              <span className="font-mono text-xs text-muted-foreground">playwright.spec.ts</span>
-              <Button variant="ghost" size="sm" onClick={copyPlaywright}>
+          <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950">
+            <div className="flex items-center justify-between border-b border-slate-700/80 px-4 py-2">
+              <span className="font-mono text-xs text-slate-300">playwright.spec.ts</span>
+              <Button variant="ghost" size="sm" className="text-slate-200 hover:bg-slate-800 hover:text-white" onClick={copyPlaywright}>
                 <Copy className="size-3.5" /> Copy
               </Button>
             </div>
-            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-xs leading-relaxed text-foreground/90">
+            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-100">
               <code>{plan.playwright}</code>
             </pre>
           </div>

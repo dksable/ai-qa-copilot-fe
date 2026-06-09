@@ -20,6 +20,9 @@ export type PlanId = "free" | "pro" | "enterprise";
 export type BillingCycle = "monthly" | "yearly";
 export type SubscriptionStatus = "Trialing" | "Active" | "Canceled" | "Past Due";
 export type TrialStatus = "Active" | "Expired" | "Converted";
+export type TestRunEnvironment = "QA" | "UAT" | "Staging" | "Production";
+export type TestRunStatus = "Not Started" | "In Progress" | "Completed";
+export type TestExecutionStatus = "Not Executed" | "Passed" | "Failed" | "Blocked" | "Skipped";
 export type ReviewAction =
   | "Submitted for Review"
   | "Approved"
@@ -396,6 +399,106 @@ export interface ProjectDetail {
   histories: TestCaseGenerationHistory[];
 }
 
+export interface ApprovedTestCaseVersion extends TestCaseHistoryRecord {
+  totalTestCases: number;
+}
+
+export interface TestRunSummary {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  moduleId: string;
+  requirementId?: string;
+  name: string;
+  environment: TestRunEnvironment;
+  buildVersion: string;
+  assignedTester: string;
+  status: TestRunStatus;
+  startDate: string;
+  endDate: string;
+  description: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  projectName: string;
+  moduleName: string;
+  requirementTitle?: string;
+  totalTestCases: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  skipped: number;
+  notExecuted: number;
+  passRate: number;
+  progress: number;
+}
+
+export interface TestExecution {
+  id: string;
+  testRunId: string;
+  testCaseId: string;
+  sourceHistoryId: string;
+  sourceCategory: "Positive" | "Negative" | "Edge";
+  title: string;
+  description: string;
+  expectedResult: string;
+  priority: "High" | "Medium" | "Low";
+  status: TestExecutionStatus;
+  actualResult: string;
+  comments: string;
+  screenshotUrl?: string;
+  bugId?: string;
+  executedBy?: string;
+  executedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestRunDetail extends TestRunSummary {
+  executions: TestExecution[];
+}
+
+export interface TestExecutionHistoryItem {
+  id: string;
+  testRunId: string;
+  testExecutionId: string;
+  testCaseId: string;
+  oldStatus: TestExecutionStatus;
+  newStatus: TestExecutionStatus;
+  updatedBy: string;
+  comment?: string;
+  actualResult?: string;
+  bugId?: string;
+  createdAt: string;
+}
+
+export interface TestExecutionDashboard {
+  totalTestRuns: number;
+  activeTestRuns: number;
+  completedTestRuns: number;
+  passRate: number;
+  failedTestCases: number;
+  blockedTestCases: number;
+  executionProgressByProject: Array<{ projectId: string; projectName: string; progress: number }>;
+  passFailChart: Array<{ name: string; value: number }>;
+  dailyExecutionTrend: Array<{ name: string; executions: number }>;
+  testerSummary: Array<{ tester: string; total: number; passed: number; failed: number }>;
+}
+
+export interface CreateTestRunInput {
+  name: string;
+  projectId: string;
+  moduleId: string;
+  requirementId?: string;
+  environment: TestRunEnvironment;
+  buildVersion: string;
+  assignedTester: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+  historyIds: string[];
+}
+
 export interface DashboardStats {
   totalProjects: number;
   activeProjects: number;
@@ -572,6 +675,11 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   if (!response.ok) {
     if (response.status === 401) localStorage.removeItem("aiqa_access_token");
     const errorBody = await response.json().catch(() => null);
+    const firstIssue = Array.isArray(errorBody?.issues) ? errorBody.issues[0] : null;
+    if (firstIssue?.message) {
+      const field = Array.isArray(firstIssue.path) ? firstIssue.path.join(".") : "";
+      throw new Error(field ? `${field}: ${firstIssue.message}` : firstIssue.message);
+    }
     throw new Error(errorBody?.message ?? "Request failed.");
   }
 
@@ -589,6 +697,15 @@ function toQueryString(filters: HistoryFilters) {
 }
 
 function analyticsQueryString(filters: AnalyticsFilters) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function executionQueryString(filters: { projectId?: string; moduleId?: string; requirementId?: string; status?: string }) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params.set(key, value);
@@ -621,6 +738,32 @@ async function downloadBlob(path: string, body: unknown, fallbackName: string) {
     throw new Error(errorBody?.message ?? "Export failed.");
   }
 
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition");
+  const filename = disposition?.match(/filename="([^"]+)"/)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadGet(path: string, fallbackName: string) {
+  const baseUrl = apiBaseUrl();
+  if (!baseUrl) throw new Error("API URL is not configured.");
+  const token = localStorage.getItem("aiqa_access_token");
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new Error(errorBody?.message ?? "Download failed.");
+  }
   const blob = await response.blob();
   const disposition = response.headers.get("Content-Disposition");
   const filename = disposition?.match(/filename="([^"]+)"/)?.[1] ?? fallbackName;
@@ -864,4 +1007,38 @@ export const projectApi = {
     apiRequest<AnalyticsAIUsage>(`/api/analytics/ai-usage${analyticsQueryString(filters)}`),
   getAnalyticsExports: (filters: AnalyticsFilters = {}) =>
     apiRequest<AnalyticsExports>(`/api/analytics/exports${analyticsQueryString(filters)}`),
+  listApprovedTestCaseVersions: (filters: { projectId?: string; moduleId?: string; requirementId?: string } = {}) =>
+    apiRequest<ApprovedTestCaseVersion[]>(`/api/approved-test-case-versions${executionQueryString(filters)}`),
+  createTestRun: (input: CreateTestRunInput) =>
+    apiRequest<TestRunSummary>("/api/test-runs", { method: "POST", body: JSON.stringify(input) }),
+  listTestRuns: (filters: { projectId?: string; status?: TestRunStatus } = {}) =>
+    apiRequest<TestRunSummary[]>(`/api/test-runs${executionQueryString(filters)}`),
+  getTestRun: (testRunId: string) => apiRequest<TestRunDetail>(`/api/test-runs/${testRunId}`),
+  updateTestRun: (testRunId: string, input: Partial<CreateTestRunInput> & { status?: TestRunStatus }) =>
+    apiRequest<TestRunSummary>(`/api/test-runs/${testRunId}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteTestRun: (testRunId: string) => apiRequest<void>(`/api/test-runs/${testRunId}`, { method: "DELETE" }),
+  listTestExecutions: (testRunId: string) =>
+    apiRequest<TestExecution[]>(`/api/test-runs/${testRunId}/executions`),
+  updateTestExecutionStatus: (
+    executionId: string,
+    input: { status: TestExecutionStatus; actualResult?: string; comments?: string; screenshotUrl?: string; bugId?: string; updatedBy?: string },
+  ) =>
+    apiRequest<TestExecution>(`/api/test-executions/${executionId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  updateTestExecutionDetails: (
+    executionId: string,
+    input: { actualResult?: string; comments?: string; screenshotUrl?: string; bugId?: string },
+  ) =>
+    apiRequest<TestExecution>(`/api/test-executions/${executionId}/details`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  getTestExecutionHistory: (executionId: string) =>
+    apiRequest<TestExecutionHistoryItem[]>(`/api/test-executions/${executionId}/history`),
+  getTestExecutionDashboard: () => apiRequest<TestExecutionDashboard>("/api/test-execution/dashboard"),
+  getTestExecutionReports: () => apiRequest<TestRunSummary[]>("/api/test-execution/reports"),
+  exportTestRunReport: (testRunId: string, format: ExportFormat) =>
+    downloadGet(`/api/test-runs/${testRunId}/export?format=${format}`, `test-run-report.${format === "excel" ? "xls" : "html"}`),
 };

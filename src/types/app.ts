@@ -12,6 +12,7 @@ export type ActiveView =
   | "projects"
   | "history"
   | "review"
+  | "execution"
   | "chat"
   | "workspace"
   | "analytics";
