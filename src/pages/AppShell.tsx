@@ -4535,21 +4535,30 @@ function LandingPage({
         title="What AI QA Copilot Can Do"
         description="A complete QA lifecycle platform for generating test assets, managing review, executing tests, collaborating across teams, and preparing for automation workflows."
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {features.map(({ title, description, icon: Icon, comingSoon, enterprise, beta }) => (
-            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
-              <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-                <Icon className="size-4" />
-              </div>
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-sm font-semibold">{title}</h3>
-                <div className="flex shrink-0 flex-wrap gap-1">
-                  {enterprise && <Badge variant="outline" className="text-[10px]">Enterprise</Badge>}
-                  {beta && <Badge variant="outline" className="border-warning/40 bg-warning/10 text-[10px] text-warning">Beta</Badge>}
-                  {comingSoon && <Badge variant="outline" className="text-[10px]">Coming Soon</Badge>}
+            <div
+              key={title}
+              className="group min-h-[132px] rounded-lg border border-border/40 bg-card/65 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/45 hover:bg-card/85 hover:shadow-card"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <Icon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-h-10 flex-col gap-1.5">
+                    <h3 className="text-sm font-semibold leading-5">{title}</h3>
+                    {(enterprise || beta || comingSoon) && (
+                      <div className="flex flex-wrap gap-1">
+                        {enterprise && <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px] leading-none">Enterprise</Badge>}
+                        {beta && <Badge variant="outline" className="h-5 rounded-full border-warning/40 bg-warning/10 px-2 text-[10px] leading-none text-warning">Beta</Badge>}
+                        {comingSoon && <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px] leading-none">Coming Soon</Badge>}
+                      </div>
+                    )}
+                  </div>
+                  <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{description}</p>
                 </div>
               </div>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
             </div>
           ))}
         </div>
