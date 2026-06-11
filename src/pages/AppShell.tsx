@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Sparkles,
+  Brain,
   Wand2,
   CheckCircle2,
   XCircle,
@@ -13,6 +14,7 @@ import {
   Beaker,
   ShieldCheck,
   Rocket,
+  Zap,
   Layers,
   ListChecks,
   Gauge,
@@ -109,6 +111,12 @@ import {
   type AnalyticsReview,
   type AnalyticsSummary,
   type AnalyticsUserProductivity,
+  type AIProviderConfig,
+  type AIProviderFeatureMapping,
+  type AIProviderFeatureName,
+  type AIProviderSettingsResponse,
+  type AIProviderUsageLog,
+  type SaveAIProviderInput,
   type AuthContextResponse,
   type AuthResponse,
   type BillingCycle,
@@ -225,6 +233,9 @@ export default function AppShell() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
   const [workspaceUsage, setWorkspaceUsage] = useState<WorkspaceUsageResponse | null>(null);
+  const [aiProviderSettings, setAIProviderSettings] = useState<AIProviderSettingsResponse | null>(null);
+  const [aiProviderUsage, setAIProviderUsage] = useState<AIProviderUsageLog[]>([]);
+  const [isAIProviderLoading, setIsAIProviderLoading] = useState(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [isPricingLoading, setIsPricingLoading] = useState(false);
   const isAuthenticated = Boolean(auth?.user);
@@ -319,10 +330,29 @@ export default function AppShell() {
       setSelectedWorkspaceId(nextWorkspaceId);
       if (nextWorkspaceId) setWorkspaceDetail(await projectApi.getWorkspace(nextWorkspaceId));
       if (nextWorkspaceId) void refreshPricing(nextWorkspaceId);
+      if (nextWorkspaceId) void refreshAIProviders(nextWorkspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load workspace");
     } finally {
       setIsWorkspaceLoading(false);
+    }
+  };
+
+  const refreshAIProviders = async (workspaceId = selectedWorkspaceId || auth?.workspace?.id || "") => {
+    if (!workspaceId) return;
+    try {
+      setIsAIProviderLoading(true);
+      const [settings, usage] = await Promise.all([
+        projectApi.listAIProviders(workspaceId),
+        projectApi.listAIProviderUsage(workspaceId),
+      ]);
+      setAIProviderSettings(settings);
+      setAIProviderUsage(usage);
+    } catch {
+      setAIProviderSettings(null);
+      setAIProviderUsage([]);
+    } finally {
+      setIsAIProviderLoading(false);
     }
   };
 
@@ -394,6 +424,7 @@ export default function AppShell() {
     void refreshWorkspace("");
     void refreshAnalytics({});
     void refreshPricing();
+    void refreshAIProviders();
   };
 
   const refreshPricing = async (workspaceId = auth?.workspace?.id) => {
@@ -591,7 +622,15 @@ export default function AppShell() {
             onAuthenticated={applyAuth}
           />
         ) : activeView === "profile" ? (
-          <ProfilePage auth={auth} onAuthChange={setAuth} />
+          <ProfilePage
+            auth={auth}
+            selectedWorkspaceId={selectedWorkspaceId || auth?.workspace?.id || ""}
+            aiProviderSettings={aiProviderSettings}
+            aiProviderUsage={aiProviderUsage}
+            isAIProviderLoading={isAIProviderLoading}
+            onAuthChange={setAuth}
+            onRefreshAIProviders={() => refreshAIProviders(selectedWorkspaceId || auth?.workspace?.id || "")}
+          />
         ) : activeView === "pricing" ? (
           <PricingPage
             plans={plans}
@@ -1323,6 +1362,122 @@ function GeneratorCard({
         </Button>
       </div>
     </Card>
+  );
+}
+
+function DashboardHomePage({
+  dashboard,
+  workspaceUsage,
+  projects,
+  reviewQueue,
+  testRuns,
+  onNavigate,
+}: {
+  dashboard: DashboardStats | null;
+  workspaceUsage: WorkspaceUsageResponse | null;
+  projects: ProjectSummary[];
+  reviewQueue: TestCaseHistoryRecord[];
+  testRuns: TestRunSummary[];
+  onNavigate: (view: ActiveView) => void;
+}) {
+  const recentProjects = projects.slice(0, 4);
+  const activeRuns = testRuns.filter((run) => run.status !== "Completed").slice(0, 4);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            <LayoutDashboard className="mr-1 size-3" /> Dashboard
+          </Badge>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Workspace Dashboard</h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Monitor QA coverage, projects, reviews, execution progress, and workspace usage from one place.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => onNavigate("projects")}>
+            <FolderKanban className="size-4" />
+            Projects
+          </Button>
+          <Button className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={() => onNavigate("generator")}>
+            <Wand2 className="size-4" />
+            Generate Tests
+          </Button>
+        </div>
+      </div>
+
+      <DashboardCards dashboard={dashboard} />
+      <WorkspaceUsageDashboard usage={workspaceUsage} />
+
+      <div className="grid gap-5 xl:grid-cols-3">
+        <Card className="app-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">Recently Updated Projects</h2>
+            <Button variant="ghost" size="sm" onClick={() => onNavigate("projects")}>View all</Button>
+          </div>
+          <div className="space-y-3">
+            {recentProjects.length ? recentProjects.map((project) => (
+              <div key={project.id} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                <p className="font-medium">{project.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {project.totalRequirements} requirements / {project.totalTestCases} test cases
+                </p>
+              </div>
+            )) : (
+              <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                No projects yet. Create a project to start organizing QA work.
+              </p>
+            )}
+          </div>
+        </Card>
+
+        <Card className="app-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">Pending Reviews</h2>
+            <Button variant="ghost" size="sm" onClick={() => onNavigate("review")}>Open queue</Button>
+          </div>
+          <div className="space-y-3">
+            {reviewQueue.slice(0, 4).map((item) => (
+              <div key={item.id} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                <p className="font-medium">{item.requirementTitle}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Version {item.version} / {item.coverageScore}% coverage
+                </p>
+              </div>
+            ))}
+            {!reviewQueue.length && (
+              <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                No review requests are pending.
+              </p>
+            )}
+          </div>
+        </Card>
+
+        <Card className="app-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">Active Test Runs</h2>
+            <Button variant="ghost" size="sm" onClick={() => onNavigate("execution")}>View runs</Button>
+          </div>
+          <div className="space-y-3">
+            {activeRuns.length ? activeRuns.map((run) => (
+              <div key={run.id} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-medium">{run.name}</p>
+                  <Badge variant="outline" className={executionStatusClass(run.status)}>{run.status}</Badge>
+                </div>
+                <Progress value={run.progress} className="mt-3 h-2" />
+                <p className="mt-2 text-xs text-muted-foreground">{run.passRate}% pass rate</p>
+              </div>
+            )) : (
+              <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                No active test runs yet.
+              </p>
+            )}
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }
 
@@ -3017,10 +3172,20 @@ function AuthPage({
 
 function ProfilePage({
   auth,
+  selectedWorkspaceId,
+  aiProviderSettings,
+  aiProviderUsage,
+  isAIProviderLoading,
   onAuthChange,
+  onRefreshAIProviders,
 }: {
   auth: AuthContextResponse | null;
+  selectedWorkspaceId: string;
+  aiProviderSettings: AIProviderSettingsResponse | null;
+  aiProviderUsage: AIProviderUsageLog[];
+  isAIProviderLoading: boolean;
   onAuthChange: (auth: AuthContextResponse | null) => void;
+  onRefreshAIProviders: () => void;
 }) {
   const [fullName, setFullName] = useState(auth?.user.fullName ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -3029,51 +3194,357 @@ function ProfilePage({
   if (!auth) return null;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">Account Settings</Badge>
-        <h1 className="font-display text-3xl font-bold">Profile</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Manage account identity, workspace role, and password settings.</p>
+        <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">Settings</Badge>
+        <h1 className="font-display text-3xl font-bold">Settings</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Manage account identity, workspace settings, security, and AI provider configuration.</p>
       </div>
+      <Tabs defaultValue="account" className="space-y-5">
+        <TabsList>
+          <TabsTrigger value="account">Account</TabsTrigger>
+          <TabsTrigger value="ai-providers">AI Providers</TabsTrigger>
+          <TabsTrigger value="security">Security</TabsTrigger>
+        </TabsList>
+        <TabsContent value="account" className="space-y-5">
+          <Card className="app-card p-6">
+            <div className="grid gap-4">
+              <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Full name" />
+              <Input value={auth.user.email} readOnly />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <MiniStat label="Role" value={auth.role} />
+                <MiniStat label="Workspace" value={auth.workspace?.workspaceName ?? "No workspace"} />
+              </div>
+              <Button
+                onClick={async () => {
+                  const updated = await projectApi.updateProfile({ fullName });
+                  onAuthChange(updated);
+                  toast.success("Profile updated");
+                }}
+              >
+                Save Profile
+              </Button>
+            </div>
+          </Card>
+        </TabsContent>
+        <TabsContent value="ai-providers">
+          <AIProvidersSettings
+            workspaceId={selectedWorkspaceId}
+            role={auth.role}
+            settings={aiProviderSettings}
+            usage={aiProviderUsage}
+            isLoading={isAIProviderLoading}
+            onRefresh={onRefreshAIProviders}
+          />
+        </TabsContent>
+        <TabsContent value="security">
+          {auth.user.authProvider === "email" && (
+            <Card className="app-card p-6">
+              <h2 className="mb-4 font-semibold">Change Password</h2>
+              <div className="grid gap-3">
+                <Input type="password" placeholder="Current password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+                <Input type="password" placeholder="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    await projectApi.changePassword({ currentPassword, newPassword });
+                    setCurrentPassword("");
+                    setNewPassword("");
+                    toast.success("Password changed");
+                  }}
+                >
+                  Change Password
+                </Button>
+              </div>
+            </Card>
+          )}
+          <Card className="app-card p-6">
+            <h2 className="font-semibold">Security Notice</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              AI provider API keys are encrypted before storage and are never displayed after saving. Rotate or delete keys when access changes.
+            </p>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+const providerTypes = [
+  ["openai", "OpenAI"],
+  ["anthropic", "Anthropic Claude"],
+  ["gemini", "Google Gemini"],
+  ["groq", "Groq"],
+  ["azure-openai", "Azure OpenAI"],
+  ["openrouter", "OpenRouter"],
+  ["custom-openai-compatible", "Custom OpenAI-Compatible API"],
+] as const;
+
+const aiFeatureLabels: Record<AIProviderFeatureName, string> = {
+  "test-generation": "Test Case Generation",
+  "ai-chat": "AI Chat",
+  "playwright-generation": "Playwright Generation",
+  "requirement-impact": "Requirement Impact Analysis",
+  "coverage-score": "Coverage Score",
+};
+
+function AIProvidersSettings({
+  workspaceId,
+  role,
+  settings,
+  usage,
+  isLoading,
+  onRefresh,
+}: {
+  workspaceId: string;
+  role: WorkspaceRole;
+  settings: AIProviderSettingsResponse | null;
+  usage: AIProviderUsageLog[];
+  isLoading: boolean;
+  onRefresh: () => void;
+}) {
+  const canManage = role === "Owner" || role === "Admin";
+  const canView = canManage || role === "QA Lead";
+  const [form, setForm] = useState<SaveAIProviderInput>({
+    workspaceId,
+    providerType: "openai",
+    providerName: "",
+    apiKey: "",
+    modelName: "",
+    baseUrl: "",
+    endpointUrl: "",
+    deploymentName: "",
+    apiVersion: "",
+    requestFormat: "OpenAI Compatible",
+    temperature: 0.2,
+    maxTokens: 4000,
+    isActive: true,
+    fallbackToDefault: true,
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setForm((value) => ({ ...value, workspaceId }));
+  }, [workspaceId]);
+
+  if (!canView) {
+    return (
+      <Card className="app-card p-8 text-center">
+        <ShieldCheck className="mx-auto mb-3 size-8 text-muted-foreground" />
+        <h2 className="font-semibold">AI provider settings are restricted</h2>
+        <p className="mt-2 text-sm text-muted-foreground">Only Owner, Admin, and QA Lead roles can view provider configuration.</p>
+      </Card>
+    );
+  }
+
+  const providers = settings?.providers ?? [];
+  const customProviders = providers.filter((provider) => !provider.isDefault);
+  const activeProvider = customProviders.find((provider) => provider.isActive) ?? providers.find((provider) => provider.isDefault);
+
+  const saveProvider = async () => {
+    if (!workspaceId) {
+      toast.error("Workspace is required.");
+      return;
+    }
+    if (!form.providerName.trim() || !form.modelName.trim()) {
+      toast.error("Provider name and model name are required.");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      await projectApi.createAIProvider({ ...form, workspaceId });
+      toast.success("AI provider saved");
+      setForm((value) => ({ ...value, providerName: "", apiKey: "", modelName: "", baseUrl: "", endpointUrl: "", deploymentName: "", apiVersion: "" }));
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save AI provider");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const updateMapping = async (featureName: AIProviderFeatureName, providerId: string) => {
+    const provider = providers.find((item) => item.id === providerId);
+    try {
+      await projectApi.updateAIProviderFeatureMapping(workspaceId, [{
+        featureName,
+        providerId,
+        modelName: provider?.modelName,
+        isActive: true,
+      }]);
+      toast.success("Feature mapping updated");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update mapping");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
       <Card className="app-card p-6">
-        <div className="grid gap-4">
-          <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Full name" />
-          <Input value={auth.user.email} readOnly />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <MiniStat label="Role" value={auth.role} />
-            <MiniStat label="Workspace" value={auth.workspace?.workspaceName ?? "No workspace"} />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-semibold">AI Providers</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Configure which AI model provider AI QA Copilot should use for test case generation, AI chat, requirement analysis, Playwright generation, and impact analysis.
+            </p>
           </div>
-          <Button
-            onClick={async () => {
-              const updated = await projectApi.updateProfile({ fullName });
-              onAuthChange(updated);
-              toast.success("Profile updated");
-            }}
-          >
-            Save Profile
+          <Button variant="outline" onClick={onRefresh} disabled={isLoading}>
+            {isLoading ? <Loader2 className="size-4 animate-spin" /> : <TrendingUp className="size-4" />}
+            Refresh
           </Button>
         </div>
+        <div className="mt-5 rounded-lg border border-primary/30 bg-primary/10 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">Recommended</Badge>
+            <p className="font-semibold">{activeProvider?.providerName ?? "AI QA Copilot Default AI"}</p>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            If no active custom provider is configured, AI QA Copilot automatically uses the default AI provider already configured for the application.
+          </p>
+        </div>
       </Card>
-      {auth.user.authProvider === "email" && (
+
+      {canManage && (
         <Card className="app-card p-6">
-          <h2 className="mb-4 font-semibold">Change Password</h2>
-          <div className="grid gap-3">
-            <Input type="password" placeholder="Current password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
-            <Input type="password" placeholder="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-            <Button
-              variant="outline"
-              onClick={async () => {
-                await projectApi.changePassword({ currentPassword, newPassword });
-                setCurrentPassword("");
-                setNewPassword("");
-                toast.success("Password changed");
-              }}
-            >
-              Change Password
+          <div className="mb-4">
+            <h3 className="font-semibold">Add Provider</h3>
+            <p className="mt-1 text-sm text-muted-foreground">API keys are encrypted and never displayed after saving.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Input placeholder="Provider name" value={form.providerName} onChange={(event) => setForm((value) => ({ ...value, providerName: event.target.value }))} />
+            <Select value={form.providerType} onValueChange={(providerType) => setForm((value) => ({ ...value, providerType: providerType as SaveAIProviderInput["providerType"] }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{providerTypes.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input placeholder="Model name" value={form.modelName} onChange={(event) => setForm((value) => ({ ...value, modelName: event.target.value }))} />
+            <Input type="password" placeholder="API key" value={form.apiKey} onChange={(event) => setForm((value) => ({ ...value, apiKey: event.target.value }))} />
+            <Input placeholder={form.providerType === "azure-openai" ? "Endpoint URL" : "Base URL optional"} value={form.providerType === "azure-openai" ? form.endpointUrl : form.baseUrl} onChange={(event) => setForm((value) => form.providerType === "azure-openai" ? ({ ...value, endpointUrl: event.target.value }) : ({ ...value, baseUrl: event.target.value }))} />
+            {form.providerType === "azure-openai" ? (
+              <>
+                <Input placeholder="Deployment name" value={form.deploymentName} onChange={(event) => setForm((value) => ({ ...value, deploymentName: event.target.value }))} />
+                <Input placeholder="API version" value={form.apiVersion} onChange={(event) => setForm((value) => ({ ...value, apiVersion: event.target.value }))} />
+              </>
+            ) : null}
+            <Input type="number" step="0.1" placeholder="Temperature" value={form.temperature} onChange={(event) => setForm((value) => ({ ...value, temperature: Number(event.target.value) }))} />
+            <Input type="number" placeholder="Max tokens" value={form.maxTokens} onChange={(event) => setForm((value) => ({ ...value, maxTokens: Number(event.target.value) }))} />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={saveProvider} disabled={isSaving}>
+              {isSaving && <Loader2 className="size-4 animate-spin" />}
+              Save Provider
             </Button>
           </div>
         </Card>
       )}
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_.9fr]">
+        <Card className="app-card p-6">
+          <h3 className="font-semibold">Provider List</h3>
+          <div className="grid gap-3">
+            {providers.map((provider) => (
+              <div key={provider.id} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold">{provider.providerName}</p>
+                      {provider.isDefault && <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">Recommended</Badge>}
+                      <Badge variant="outline" className={provider.isActive ? "border-success/40 bg-success/10 text-success" : "border-muted-foreground/40 bg-muted/40 text-muted-foreground"}>
+                        {provider.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">{provider.modelName} / {provider.providerType}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Key: {provider.apiKeyMasked || "Managed by AI QA Copilot"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Created by {provider.createdBy} · {formatDate(provider.createdAt)}</p>
+                  </div>
+                  {canManage && !provider.isDefault && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={async () => {
+                        try {
+                          await projectApi.testAIProvider(provider.id);
+                          toast.success("AI provider connection successful");
+                          onRefresh();
+                        } catch (error) {
+                          toast.error(error instanceof Error ? error.message : "Connection failed");
+                          onRefresh();
+                        }
+                      }}>Test</Button>
+                      <Button size="sm" variant="outline" onClick={async () => {
+                        await (provider.isActive ? projectApi.deactivateAIProvider(provider.id) : projectApi.activateAIProvider(provider.id));
+                        toast.success(provider.isActive ? "Provider deactivated" : "Provider activated");
+                        onRefresh();
+                      }}>{provider.isActive ? "Deactivate" : "Activate"}</Button>
+                      <Button size="sm" variant="ghost" onClick={async () => {
+                        if (!window.confirm("Delete this AI provider?")) return;
+                        await projectApi.deleteAIProvider(provider.id);
+                        toast.success("Provider deleted");
+                        onRefresh();
+                      }}><Trash2 className="size-4" /></Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="app-card p-6">
+          <h3 className="font-semibold">Security Notice</h3>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            API keys are encrypted before saving, masked in the UI, and never exposed in API responses. Use Test Connection after saving a provider.
+          </p>
+          <div className="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-muted-foreground">
+            Only Owner and Admin users can add, update, test, activate, or delete providers.
+          </div>
+        </Card>
+      </div>
+
+      <Card className="app-card p-6">
+        <h3 className="font-semibold">Feature-Level Model Mapping</h3>
+        <div className="mt-4 overflow-hidden rounded-lg border border-border/40">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Feature</th>
+                <th className="px-4 py-3">Provider</th>
+                <th className="px-4 py-3">Model</th>
+                <th className="px-4 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {(settings?.featureMappings ?? []).map((mapping) => (
+                <tr key={mapping.featureName}>
+                  <td className="px-4 py-3 font-medium">{aiFeatureLabels[mapping.featureName]}</td>
+                  <td className="px-4 py-3">
+                    {canManage ? (
+                      <Select value={mapping.providerId} onValueChange={(providerId) => updateMapping(mapping.featureName, providerId)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>{providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.providerName}</SelectItem>)}</SelectContent>
+                      </Select>
+                    ) : mapping.providerName}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{mapping.modelName}</td>
+                  <td className="px-4 py-3"><Badge variant="outline">{mapping.isActive ? "Active" : "Inactive"}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card className="app-card p-6">
+        <h3 className="font-semibold">Usage Logs</h3>
+        <div className="mt-4 space-y-2">
+          {usage.slice(0, 8).map((log) => (
+            <div key={log.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/40 bg-surface/40 p-3 text-sm">
+              <span>{aiFeatureLabels[log.featureName]} · {log.providerName} · {log.modelName}</span>
+              <Badge variant="outline" className={log.status === "Success" ? "border-success/40 bg-success/10 text-success" : "border-destructive/40 bg-destructive/10 text-destructive"}>{log.status}</Badge>
+              <span className="text-xs text-muted-foreground">{formatDate(log.createdAt)}</span>
+            </div>
+          ))}
+          {!usage.length && <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">No AI provider usage has been logged yet.</p>}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -3164,6 +3635,11 @@ function LandingPage({
       icon: Code2,
       comingSoon: true,
     },
+    {
+      title: "AI Provider Flexibility",
+      description: "Use AI QA Copilot’s default AI or connect your own AI provider such as OpenAI, Claude, Gemini, Groq, Azure OpenAI, or custom LLMs.",
+      icon: Sparkles,
+    },
   ];
   const whyChoose = [
     {
@@ -3241,6 +3717,39 @@ function LandingPage({
     "Improve release confidence",
     "Centralize QA assets",
     "Enable better management reporting",
+  ];
+  const aiProviderCards = [
+    {
+      title: "AI QA Copilot AI",
+      description: "Built-in AI with zero setup.",
+      badge: "Default",
+      icon: Sparkles,
+    },
+    {
+      title: "OpenAI",
+      description: "Connect GPT models using your own API key.",
+      icon: Bot,
+    },
+    {
+      title: "Claude",
+      description: "Use Claude for advanced reasoning and requirement analysis.",
+      icon: Brain,
+    },
+    {
+      title: "Gemini",
+      description: "Connect Google Gemini for AI-powered QA workflows.",
+      icon: Sparkles,
+    },
+    {
+      title: "Groq",
+      description: "Use ultra-fast AI inference for test generation.",
+      icon: Zap,
+    },
+    {
+      title: "Enterprise AI",
+      description: "Azure OpenAI, OpenRouter, or custom OpenAI-compatible APIs.",
+      icon: ShieldCheck,
+    },
   ];
   const faqs = [
     ["What is AI QA Copilot?", "AI QA Copilot is an AI-powered QA lifecycle platform for test design, review, execution, collaboration, analytics, and reporting."],
@@ -3321,6 +3830,40 @@ function LandingPage({
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
             </div>
           ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="AI Providers / BYOAI"
+        title="Choose Your AI. No Vendor Lock-In."
+        description="Use AI QA Copilot’s built-in AI or connect your organization’s preferred AI provider for test generation, AI chat, impact analysis, and Playwright automation."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {aiProviderCards.map(({ title, description, badge, icon: Icon }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5 transition-colors hover:border-primary/40">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <span className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Icon className="size-5" />
+                </span>
+                {badge && <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">{badge}</Badge>}
+              </div>
+              <h3 className="font-semibold">{title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 rounded-lg border border-primary/30 bg-primary/10 p-5">
+          <div className="flex flex-wrap items-start gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <ShieldCheck className="size-5" />
+            </span>
+            <div>
+              <h3 className="font-semibold">Bring Your Own AI</h3>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
+                Enterprise teams can use their existing AI subscriptions, reduce vendor lock-in, control AI usage, and align with internal security policies.
+              </p>
+            </div>
+          </div>
         </div>
       </LandingSection>
 

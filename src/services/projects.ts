@@ -23,6 +23,22 @@ export type TrialStatus = "Active" | "Expired" | "Converted";
 export type TestRunEnvironment = "QA" | "UAT" | "Staging" | "Production";
 export type TestRunStatus = "Not Started" | "In Progress" | "Completed";
 export type TestExecutionStatus = "Not Executed" | "Passed" | "Failed" | "Blocked" | "Skipped";
+export type AIProviderType =
+  | "default"
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "groq"
+  | "azure-openai"
+  | "openrouter"
+  | "custom-openai-compatible";
+export type AIProviderFeatureName =
+  | "test-generation"
+  | "ai-chat"
+  | "playwright-generation"
+  | "requirement-impact"
+  | "coverage-score";
+export type AIProviderUsageStatus = "Success" | "Failed";
 export type ReviewAction =
   | "Submitted for Review"
   | "Approved"
@@ -140,6 +156,79 @@ export interface AuthContextResponse {
 export interface AuthResponse extends AuthContextResponse {
   accessToken: string;
   expiresAt: string;
+}
+
+export interface AIProviderConfig {
+  id: string;
+  workspaceId: string;
+  providerType: AIProviderType;
+  providerName: string;
+  apiKeyMasked?: string;
+  baseUrl?: string;
+  modelName: string;
+  endpointUrl?: string;
+  deploymentName?: string;
+  apiVersion?: string;
+  requestFormat?: "OpenAI Compatible";
+  temperature: number;
+  maxTokens: number;
+  isDefault: boolean;
+  isActive: boolean;
+  fallbackToDefault: boolean;
+  lastTestedAt?: string;
+  lastTestStatus?: AIProviderUsageStatus;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIProviderFeatureMapping {
+  id: string;
+  workspaceId: string;
+  featureName: AIProviderFeatureName;
+  providerId: string;
+  providerName: string;
+  providerType: AIProviderType;
+  modelName: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export interface AIProviderUsageLog {
+  id: string;
+  workspaceId: string;
+  providerType: AIProviderType;
+  providerName: string;
+  modelName: string;
+  featureName: AIProviderFeatureName;
+  tokenUsage?: number;
+  status: AIProviderUsageStatus;
+  errorMessage?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface AIProviderSettingsResponse {
+  providers: AIProviderConfig[];
+  featureMappings: AIProviderFeatureMapping[];
+}
+
+export interface SaveAIProviderInput {
+  workspaceId: string;
+  providerType: Exclude<AIProviderType, "default">;
+  providerName: string;
+  apiKey?: string;
+  baseUrl?: string;
+  modelName: string;
+  endpointUrl?: string;
+  deploymentName?: string;
+  apiVersion?: string;
+  requestFormat?: "OpenAI Compatible";
+  temperature?: number;
+  maxTokens?: number;
+  isActive?: boolean;
+  fallbackToDefault?: boolean;
 }
 
 export interface Plan {
@@ -990,6 +1079,30 @@ export const projectApi = {
     apiRequest<WorkspacePermission>(`/api/workspaces/${workspaceId}/roles/${role}`, {
       method: "PATCH",
       body: JSON.stringify({ role, permissions }),
+    }),
+  listAIProviders: (workspaceId: string) =>
+    apiRequest<AIProviderSettingsResponse>(`/api/ai-providers?workspaceId=${encodeURIComponent(workspaceId)}`),
+  createAIProvider: (input: SaveAIProviderInput) =>
+    apiRequest<AIProviderConfig>("/api/ai-providers", { method: "POST", body: JSON.stringify(input) }),
+  updateAIProvider: (providerId: string, input: Partial<Omit<SaveAIProviderInput, "workspaceId">>) =>
+    apiRequest<AIProviderConfig>(`/api/ai-providers/${providerId}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteAIProvider: (providerId: string) =>
+    apiRequest<void>(`/api/ai-providers/${providerId}`, { method: "DELETE" }),
+  testAIProvider: (providerId: string) =>
+    apiRequest<{ ok: boolean; message: string }>(`/api/ai-providers/${providerId}/test`, { method: "POST" }),
+  activateAIProvider: (providerId: string) =>
+    apiRequest<AIProviderConfig>(`/api/ai-providers/${providerId}/activate`, { method: "PATCH" }),
+  deactivateAIProvider: (providerId: string) =>
+    apiRequest<AIProviderConfig>(`/api/ai-providers/${providerId}/deactivate`, { method: "PATCH" }),
+  listAIProviderUsage: (workspaceId: string) =>
+    apiRequest<AIProviderUsageLog[]>(`/api/ai-providers/usage?workspaceId=${encodeURIComponent(workspaceId)}`),
+  updateAIProviderFeatureMapping: (
+    workspaceId: string,
+    mappings: Array<{ featureName: AIProviderFeatureName; providerId: string; modelName?: string; isActive?: boolean }>,
+  ) =>
+    apiRequest<AIProviderFeatureMapping[]>("/api/ai-providers/feature-mapping", {
+      method: "PUT",
+      body: JSON.stringify({ workspaceId, mappings }),
     }),
   getAnalyticsSummary: (filters: AnalyticsFilters = {}) =>
     apiRequest<AnalyticsSummary>(`/api/analytics/summary${analyticsQueryString(filters)}`),
