@@ -34,8 +34,10 @@ import {
   Search,
   Github,
   GitBranch,
+  GitMerge,
   GitPullRequest,
   GitCompare,
+  RefreshCw,
   Bot,
   Send,
   MessageSquare,
@@ -139,6 +141,7 @@ import {
   type ProjectSummary,
   type Requirement,
   type RepositoryAnalysis,
+  type RepositorySync,
   type ReviewDetail,
   type Workspace,
   type WorkspaceDetail,
@@ -244,6 +247,7 @@ export default function AppShell() {
   const [isAIProviderLoading, setIsAIProviderLoading] = useState(false);
   const [githubAutomationConfig, setGithubAutomationConfig] = useState<GitHubAutomationConfig | null>(null);
   const [repositoryAnalysis, setRepositoryAnalysis] = useState<RepositoryAnalysis | null>(null);
+  const [repositorySyncs, setRepositorySyncs] = useState<RepositorySync[]>([]);
   const [isIntegrationLoading, setIsIntegrationLoading] = useState(false);
   const [isPushingPlaywright, setIsPushingPlaywright] = useState(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
@@ -375,11 +379,14 @@ export default function AppShell() {
         projectApi.getGitHubAutomationConfig(workspaceId),
         projectApi.getGitHubRepositoryAnalysis(workspaceId),
       ]);
+      const syncs = config ? await projectApi.listGitHubRepositorySyncs(workspaceId) : [];
       setGithubAutomationConfig(config);
       setRepositoryAnalysis(analysis);
+      setRepositorySyncs(syncs);
     } catch {
       setGithubAutomationConfig(null);
       setRepositoryAnalysis(null);
+      setRepositorySyncs([]);
     } finally {
       setIsIntegrationLoading(false);
     }
@@ -3331,6 +3338,7 @@ function ProfilePage({
             role={auth.role}
             config={githubAutomationConfig}
             analysis={repositoryAnalysis}
+            syncs={repositorySyncs}
             isLoading={isIntegrationLoading}
             onRefresh={onRefreshIntegrations}
           />
@@ -3391,6 +3399,7 @@ function AutomationRepositorySettings({
   role,
   config,
   analysis,
+  syncs,
   isLoading,
   onRefresh,
 }: {
@@ -3398,6 +3407,7 @@ function AutomationRepositorySettings({
   role: WorkspaceRole;
   config: GitHubAutomationConfig | null;
   analysis: RepositoryAnalysis | null;
+  syncs: RepositorySync[];
   isLoading: boolean;
   onRefresh: () => void;
 }) {
@@ -3412,6 +3422,10 @@ function AutomationRepositorySettings({
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [activeSyncId, setActiveSyncId] = useState("");
+  const [isGeneratingSyncSuggestions, setIsGeneratingSyncSuggestions] = useState(false);
+  const [isCreatingSyncPr, setIsCreatingSyncPr] = useState(false);
   const [isOverrideOpen, setIsOverrideOpen] = useState(false);
   const [overrideForm, setOverrideForm] = useState({
     language: analysis?.language ?? "TypeScript",
@@ -3520,6 +3534,68 @@ function AutomationRepositorySettings({
       toast.error(error instanceof Error ? error.message : "Failed to save repository analysis override");
     }
   };
+  const activeSync = syncs.find((sync) => sync.id === activeSyncId) ?? syncs[0] ?? null;
+
+  const syncRepository = async () => {
+    if (!workspaceId) return;
+    if (!analysis) {
+      toast.error("Run Smart Repository Analysis before syncing repository changes.");
+      return;
+    }
+    try {
+      setIsSyncing(true);
+      const sync = await projectApi.syncGitHubRepository(workspaceId);
+      setActiveSyncId(sync.id);
+      toast.success(`Repository sync completed: ${sync.changedFiles.length} changed file(s)`);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Repository sync failed");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const generateSyncSuggestions = async () => {
+    if (!activeSync) return;
+    try {
+      setIsGeneratingSyncSuggestions(true);
+      await projectApi.generateGitHubRepositorySyncSuggestions(activeSync.id);
+      toast.success("AI repository sync suggestions generated");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate sync suggestions");
+    } finally {
+      setIsGeneratingSyncSuggestions(false);
+    }
+  };
+
+  const createSyncPr = async () => {
+    if (!activeSync) return;
+    try {
+      setIsCreatingSyncPr(true);
+      const updated = await projectApi.createGitHubRepositorySyncPr(activeSync.id);
+      toast.success(
+        <span>
+          Repository Sync PR created:{" "}
+          <a className="font-semibold underline" href={updated.pullRequest?.pullRequestUrl || updated.prUrl} target="_blank" rel="noreferrer">
+            View PR
+          </a>
+        </span>,
+      );
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create repository sync PR");
+    } finally {
+      setIsCreatingSyncPr(false);
+    }
+  };
+
+  const riskClass = (risk: string) =>
+    risk === "High"
+      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      : risk === "Medium"
+        ? "border-warning/40 bg-warning/10 text-warning"
+        : "border-success/40 bg-success/10 text-success";
 
   return (
     <div className="space-y-5">
@@ -3729,6 +3805,120 @@ function AutomationRepositorySettings({
           </div>
         </Card>
       </div>
+
+      <Card className="app-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">Repository Sync</Badge>
+              <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">Beta</Badge>
+            </div>
+            <h3 className="font-display text-xl font-semibold">AI Repository Sync</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Detect repository changes, identify impacted Playwright tests, generate AI recommendations, and create a pull request for QA review.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={syncRepository} disabled={!config || !analysis || isSyncing}>
+              {isSyncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              Sync Repository
+            </Button>
+            <Button variant="outline" onClick={generateSyncSuggestions} disabled={!activeSync || isGeneratingSyncSuggestions}>
+              {isGeneratingSyncSuggestions ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              Generate Suggestions
+            </Button>
+            <Button onClick={createSyncPr} disabled={!activeSync?.aiSuggestions.length || isCreatingSyncPr}>
+              {isCreatingSyncPr ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
+              Create Update PR
+            </Button>
+          </div>
+        </div>
+
+        {!config ? (
+          <p className="mt-5 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">Connect GitHub before using Repository Sync Beta.</p>
+        ) : !analysis ? (
+          <p className="mt-5 rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">Run Smart Repository Analysis before syncing repository changes.</p>
+        ) : !activeSync ? (
+          <p className="mt-5 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">No repository sync has been created yet.</p>
+        ) : (
+          <div className="mt-5 space-y-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniStat label="Changed Files" value={String(activeSync.changedFiles.length)} />
+              <MiniStat label="Impacted Tests" value={String(activeSync.impactedTests.length)} />
+              <MiniStat label="Risk Level" value={activeSync.riskLevel} />
+              <MiniStat label="Latest Commit" value={activeSync.latestCommitSha.slice(0, 8)} />
+            </div>
+            {activeSync.prUrl && (
+              <div className="rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success">
+                Pull Request created: <a href={activeSync.prUrl} target="_blank" rel="noreferrer" className="font-semibold underline">View PR</a>
+              </div>
+            )}
+            <div className="overflow-hidden rounded-lg border border-border/40">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">File Path</th>
+                    <th className="px-3 py-2">Change</th>
+                    <th className="px-3 py-2">Module</th>
+                    <th className="px-3 py-2">Risk</th>
+                    <th className="px-3 py-2">Possible Impact</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {activeSync.changedFiles.slice(0, 10).map((file) => (
+                    <tr key={file.filePath}>
+                      <td className="px-3 py-2 font-mono text-xs">{file.filePath}</td>
+                      <td className="px-3 py-2">{file.changeType}</td>
+                      <td className="px-3 py-2">{file.relatedModule}</td>
+                      <td className="px-3 py-2"><Badge variant="outline" className={riskClass(file.riskLevel)}>{file.riskLevel}</Badge></td>
+                      <td className="px-3 py-2 text-muted-foreground">{file.possibleTestImpact}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-border/40">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">Impacted Test</th>
+                    <th className="px-3 py-2">Changed File</th>
+                    <th className="px-3 py-2">Action</th>
+                    <th className="px-3 py-2">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {activeSync.impactedTests.slice(0, 10).map((test, index) => (
+                    <tr key={`${test.testFile}-${index}`}>
+                      <td className="px-3 py-2 font-mono text-xs">{test.testFile}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{test.relatedChangedFile}</td>
+                      <td className="px-3 py-2">{test.suggestedAction}</td>
+                      <td className="px-3 py-2">{test.confidenceScore}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {activeSync.aiSuggestions.length ? activeSync.aiSuggestions.map((suggestion, index) => (
+                <div key={index} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h4 className="font-semibold">AI Recommendation</h4>
+                    <Badge variant="outline" className={riskClass(suggestion.riskLevel)}>{suggestion.riskLevel}</Badge>
+                  </div>
+                  <p className="text-sm leading-6 text-muted-foreground">{suggestion.summary}</p>
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                    {suggestion.suggestedUpdates.map((update) => <li key={update}>{update}</li>)}
+                  </ul>
+                  <p className="mt-3 text-sm font-medium">{suggestion.recommendedPrAction}</p>
+                </div>
+              )) : (
+                <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground lg:col-span-2">Generate AI suggestions after syncing the repository.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
@@ -4079,6 +4269,13 @@ function LandingPage({
       enterprise: true,
     },
     {
+      title: "AI Repository Sync",
+      description: "Continuously monitor connected GitHub repositories, detect application changes, identify impacted Playwright tests, generate AI-powered update suggestions, and create Pull Requests for review.",
+      icon: RefreshCw,
+      beta: true,
+      enterprise: true,
+    },
+    {
       title: "Jira Integration",
       description: "Coming soon for issue sync and traceability.",
       icon: Rocket,
@@ -4143,16 +4340,24 @@ function LandingPage({
       description: "Govern versions and approvals",
     },
     {
-      title: "Review & Approval",
-      description: "Govern versions and approvals",
-    },
-    {
       title: "Smart Repository Analysis",
       description: "Understand automation repo style",
     },
     {
-      title: "Generate Matching Playwright Tests",
+      title: "Generate Playwright Tests",
       description: "Follow existing repo patterns",
+    },
+    {
+      title: "Repository Sync",
+      description: "Monitor latest code changes",
+    },
+    {
+      title: "AI Detects Changes",
+      description: "Find impacted automation",
+    },
+    {
+      title: "Suggest Test Updates",
+      description: "Recommend maintenance work",
     },
     {
       title: "Create Pull Request",
@@ -4233,6 +4438,28 @@ function LandingPage({
       icon: GitPullRequest,
     },
   ];
+  const repositorySyncBenefits = [
+    {
+      title: "Detect Code Changes",
+      description: "Automatically detect changed modules, pages, APIs, and UI components.",
+      icon: RefreshCw,
+    },
+    {
+      title: "Identify Impacted Tests",
+      description: "Find Playwright tests that may be affected by recent application changes.",
+      icon: Search,
+    },
+    {
+      title: "AI Update Suggestions",
+      description: "Generate intelligent recommendations to update existing automation tests.",
+      icon: Sparkles,
+    },
+    {
+      title: "Create Pull Requests",
+      description: "Create feature branches and Pull Requests for QA team review before merging.",
+      icon: GitMerge,
+    },
+  ];
   const faqs = [
     ["What is AI QA Copilot?", "AI QA Copilot is an AI-powered QA lifecycle platform for test design, review, execution, collaboration, analytics, and reporting."],
     ["Can it generate Playwright tests?", "Yes. The product generates Playwright test skeletons today, with repository Pull Request workflows planned for GitHub and Bitbucket."],
@@ -4254,7 +4481,7 @@ function LandingPage({
             <span className="block text-primary">AI-Powered Quality Engineering Platform</span>
           </h1>
           <p className="mt-6 max-w-3xl text-base leading-7 text-muted-foreground md:text-lg md:leading-8">
-            AI QA Copilot is an AI-powered Quality Engineering Platform that helps QA, Product, and Engineering teams generate, review, execute, analyze, and manage QA work across the complete software testing lifecycle.
+            AI QA Copilot is an AI-powered Quality Engineering Platform that helps QA, Product, and Engineering teams generate, review, execute, analyze, and manage QA work across the complete software testing lifecycle, while understanding automation frameworks and keeping Playwright suites up to date.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button size="lg" className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onStart}>
@@ -4309,7 +4536,7 @@ function LandingPage({
         description="A complete QA lifecycle platform for generating test assets, managing review, executing tests, collaborating across teams, and preparing for automation workflows."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {features.map(({ title, description, icon: Icon, comingSoon, enterprise }) => (
+          {features.map(({ title, description, icon: Icon, comingSoon, enterprise, beta }) => (
             <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
               <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
                 <Icon className="size-4" />
@@ -4318,6 +4545,7 @@ function LandingPage({
                 <h3 className="text-sm font-semibold">{title}</h3>
                 <div className="flex shrink-0 flex-wrap gap-1">
                   {enterprise && <Badge variant="outline" className="text-[10px]">Enterprise</Badge>}
+                  {beta && <Badge variant="outline" className="border-warning/40 bg-warning/10 text-[10px] text-warning">Beta</Badge>}
                   {comingSoon && <Badge variant="outline" className="text-[10px]">Coming Soon</Badge>}
                 </div>
               </div>
@@ -4347,6 +4575,48 @@ function LandingPage({
           <p className="max-w-5xl text-sm leading-6 text-muted-foreground">
             <span className="font-semibold text-foreground">Smart Repository Analysis</span> helps automation teams avoid generic generated code. AI QA Copilot adapts to the existing test framework, language, and coding standards, making generated Playwright tests easier to review, maintain, and merge.
           </p>
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="Repository Sync Beta"
+        title="Keep Your Automation Suite Always Up-to-Date"
+        description="AI QA Copilot continuously monitors repository changes and helps automation teams keep Playwright tests synchronized with the latest application updates."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {repositorySyncBenefits.map(({ title, description, icon: Icon }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5">
+              <div className="mb-4 flex size-10 items-center justify-center rounded-md bg-warning/10 text-warning">
+                <Icon className="size-5" />
+              </div>
+              <h3 className="font-semibold">{title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 rounded-lg border border-warning/30 bg-warning/10 p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">Beta</Badge>
+            <h3 className="font-semibold">AI Repository Sync</h3>
+          </div>
+          <p className="max-w-5xl text-sm leading-6 text-muted-foreground">
+            Reduce manual automation maintenance by automatically detecting application changes, identifying impacted Playwright tests, and generating AI-assisted update suggestions before creating Pull Requests.
+          </p>
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {[
+              "Reduce automation maintenance effort",
+              "Detect impacted tests automatically",
+              "Improve regression test reliability",
+              "Accelerate QA review cycles",
+              "Minimize flaky and outdated tests",
+              "Keep automation repositories synchronized",
+            ].map((benefit) => (
+              <div key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CheckCircle2 className="size-4 text-success" />
+                {benefit}
+              </div>
+            ))}
+          </div>
         </div>
       </LandingSection>
 

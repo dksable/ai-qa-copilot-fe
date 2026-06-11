@@ -284,6 +284,10 @@ export type RepositoryAnalysisFramework =
   | "Unknown";
 export type RepositoryAnalysisBuildTool = "npm" | "Maven" | "Gradle" | "Unknown";
 export type RepositoryAnalysisPattern = "Page Object Model" | "Fixtures" | "Direct Playwright" | "Custom";
+export type RepositorySyncStatus = "Pending" | "Completed" | "Failed";
+export type RepositoryChangeType = "Added" | "Modified" | "Deleted";
+export type RepositoryRiskLevel = "Low" | "Medium" | "High";
+export type RepositorySuggestedAction = "Update" | "Add" | "Review" | "No Action";
 
 export interface RepositoryAnalysis {
   id: string;
@@ -305,6 +309,51 @@ export interface RepositoryAnalysis {
   pattern: RepositoryAnalysisPattern;
   confidenceScore: number;
   scannedFiles: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepositoryChangedFile {
+  filePath: string;
+  changeType: RepositoryChangeType;
+  relatedModule: string;
+  riskLevel: RepositoryRiskLevel;
+  possibleTestImpact: string;
+}
+
+export interface RepositoryImpactedTest {
+  testFile: string;
+  relatedChangedFile: string;
+  impactReason: string;
+  suggestedAction: RepositorySuggestedAction;
+  confidenceScore: number;
+}
+
+export interface RepositoryAISuggestion {
+  summary: string;
+  impactedTests: string[];
+  suggestedUpdates: string[];
+  riskLevel: RepositoryRiskLevel;
+  recommendedPrAction: string;
+}
+
+export interface RepositorySync {
+  id: string;
+  workspaceId: string;
+  integrationId: string;
+  provider: "github";
+  repoOwner: string;
+  repoName: string;
+  branch: string;
+  previousCommitSha?: string;
+  latestCommitSha: string;
+  changedFiles: RepositoryChangedFile[];
+  impactedTests: RepositoryImpactedTest[];
+  aiSuggestions: RepositoryAISuggestion[];
+  riskLevel: RepositoryRiskLevel;
+  status: RepositorySyncStatus;
+  prUrl?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -1209,6 +1258,22 @@ export const projectApi = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  syncGitHubRepository: (workspaceId: string) =>
+    apiRequest<RepositorySync>("/api/integrations/github/sync", {
+      method: "POST",
+      body: JSON.stringify({ workspaceId }),
+    }),
+  listGitHubRepositorySyncs: (workspaceId: string) =>
+    apiRequest<RepositorySync[]>(`/api/integrations/github/sync-history?workspaceId=${encodeURIComponent(workspaceId)}`),
+  getGitHubRepositorySync: (syncId: string) =>
+    apiRequest<RepositorySync>(`/api/integrations/github/sync/${syncId}`),
+  generateGitHubRepositorySyncSuggestions: (syncId: string) =>
+    apiRequest<RepositorySync>(`/api/integrations/github/sync/${syncId}/generate-suggestions`, { method: "POST" }),
+  createGitHubRepositorySyncPr: (syncId: string) =>
+    apiRequest<RepositorySync & { pullRequest?: { pullRequestUrl: string; pullRequestNumber: number; branchName: string; reportPath: string } }>(
+      `/api/integrations/github/sync/${syncId}/create-pr`,
+      { method: "POST" },
+    ),
   pushPlaywrightToGitHub: (input: PushPlaywrightToGitHubInput) =>
     apiRequest<PushPlaywrightToGitHubResult>("/api/integrations/github/push-playwright-test", {
       method: "POST",
