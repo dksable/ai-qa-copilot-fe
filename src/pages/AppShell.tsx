@@ -32,6 +32,9 @@ import {
   History,
   Download,
   Search,
+  Github,
+  GitBranch,
+  GitPullRequest,
   GitCompare,
   Bot,
   Send,
@@ -39,6 +42,7 @@ import {
   ClipboardList,
   Users,
   BarChart3,
+  Layers3,
   TrendingUp,
   UserCircle,
 } from "lucide-react";
@@ -125,6 +129,7 @@ import {
   type EntityStatus,
   type ExportFormat,
   type ExportHistoryRecord,
+  type GitHubAutomationConfig,
   type HistoryFilters,
   type HistoryStatus,
   type ModulePriority,
@@ -133,6 +138,7 @@ import {
   type ProjectModule,
   type ProjectSummary,
   type Requirement,
+  type RepositoryAnalysis,
   type ReviewDetail,
   type Workspace,
   type WorkspaceDetail,
@@ -236,6 +242,10 @@ export default function AppShell() {
   const [aiProviderSettings, setAIProviderSettings] = useState<AIProviderSettingsResponse | null>(null);
   const [aiProviderUsage, setAIProviderUsage] = useState<AIProviderUsageLog[]>([]);
   const [isAIProviderLoading, setIsAIProviderLoading] = useState(false);
+  const [githubAutomationConfig, setGithubAutomationConfig] = useState<GitHubAutomationConfig | null>(null);
+  const [repositoryAnalysis, setRepositoryAnalysis] = useState<RepositoryAnalysis | null>(null);
+  const [isIntegrationLoading, setIsIntegrationLoading] = useState(false);
+  const [isPushingPlaywright, setIsPushingPlaywright] = useState(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [isPricingLoading, setIsPricingLoading] = useState(false);
   const isAuthenticated = Boolean(auth?.user);
@@ -331,6 +341,7 @@ export default function AppShell() {
       if (nextWorkspaceId) setWorkspaceDetail(await projectApi.getWorkspace(nextWorkspaceId));
       if (nextWorkspaceId) void refreshPricing(nextWorkspaceId);
       if (nextWorkspaceId) void refreshAIProviders(nextWorkspaceId);
+      if (nextWorkspaceId) void refreshIntegrations(nextWorkspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load workspace");
     } finally {
@@ -353,6 +364,24 @@ export default function AppShell() {
       setAIProviderUsage([]);
     } finally {
       setIsAIProviderLoading(false);
+    }
+  };
+
+  const refreshIntegrations = async (workspaceId = selectedWorkspaceId || auth?.workspace?.id || "") => {
+    if (!workspaceId) return;
+    try {
+      setIsIntegrationLoading(true);
+      const [config, analysis] = await Promise.all([
+        projectApi.getGitHubAutomationConfig(workspaceId),
+        projectApi.getGitHubRepositoryAnalysis(workspaceId),
+      ]);
+      setGithubAutomationConfig(config);
+      setRepositoryAnalysis(analysis);
+    } catch {
+      setGithubAutomationConfig(null);
+      setRepositoryAnalysis(null);
+    } finally {
+      setIsIntegrationLoading(false);
     }
   };
 
@@ -402,6 +431,47 @@ export default function AppShell() {
     }
   };
 
+  const pushPlaywrightToGitHub = async (fileName: string) => {
+    if (!plan) return;
+    const workspaceId = selectedWorkspaceId || auth?.workspace?.id;
+    if (!workspaceId) {
+      toast.error("Select a workspace before pushing to GitHub.");
+      return;
+    }
+    if (!githubAutomationConfig) {
+      toast.error("Please configure GitHub repository integration first.");
+      return;
+    }
+    try {
+      setIsPushingPlaywright(true);
+      const moduleItem = projectDetail?.modules.find((item) => item.id === selectedModuleId);
+      const requirementItem = moduleItem?.requirements.find((item) => item.id === selectedRequirementId);
+      const result = await projectApi.pushPlaywrightToGitHub({
+        workspaceId,
+        fileName,
+        playwrightCode: plan.playwright,
+        requirementTitle: requirementItem?.title || requirement.slice(0, 80) || "Generated Playwright Tests",
+        projectName: projectDetail?.project.name,
+        moduleName: moduleItem?.name,
+        coverageScore: plan.coverageAnalysis?.score,
+        generatedBy: auth?.user.fullName || auth?.user.email,
+        version: plan.savedHistoryId ? "Saved history" : "Current generated result",
+      });
+      toast.success(
+        <span>
+          Pull Request created successfully:{" "}
+          <a className="font-semibold underline" href={result.pullRequestUrl} target="_blank" rel="noreferrer">
+            View PR
+          </a>
+        </span>,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to push Playwright test to GitHub");
+    } finally {
+      setIsPushingPlaywright(false);
+    }
+  };
+
   const applyAuth = (response: AuthResponse | AuthContextResponse) => {
     if ("accessToken" in response) localStorage.setItem("aiqa_access_token", response.accessToken);
     setAuth({
@@ -425,6 +495,7 @@ export default function AppShell() {
     void refreshAnalytics({});
     void refreshPricing();
     void refreshAIProviders();
+    void refreshIntegrations();
   };
 
   const refreshPricing = async (workspaceId = auth?.workspace?.id) => {
@@ -628,8 +699,12 @@ export default function AppShell() {
             aiProviderSettings={aiProviderSettings}
             aiProviderUsage={aiProviderUsage}
             isAIProviderLoading={isAIProviderLoading}
+            githubAutomationConfig={githubAutomationConfig}
+            repositoryAnalysis={repositoryAnalysis}
+            isIntegrationLoading={isIntegrationLoading}
             onAuthChange={setAuth}
             onRefreshAIProviders={() => refreshAIProviders(selectedWorkspaceId || auth?.workspace?.id || "")}
+            onRefreshIntegrations={() => refreshIntegrations(selectedWorkspaceId || auth?.workspace?.id || "")}
           />
         ) : activeView === "pricing" ? (
           <PricingPage
@@ -701,6 +776,10 @@ export default function AppShell() {
                       : undefined
                   }
                   isExporting={isExporting}
+                  githubConfig={githubAutomationConfig}
+                  repositoryAnalysis={repositoryAnalysis}
+                  isPushingPlaywright={isPushingPlaywright}
+                  onPushPlaywright={pushPlaywrightToGitHub}
                 />
               )}
               {!isGenerating && !plan && <EmptyState />}
@@ -3176,16 +3255,24 @@ function ProfilePage({
   aiProviderSettings,
   aiProviderUsage,
   isAIProviderLoading,
+  githubAutomationConfig,
+  repositoryAnalysis,
+  isIntegrationLoading,
   onAuthChange,
   onRefreshAIProviders,
+  onRefreshIntegrations,
 }: {
   auth: AuthContextResponse | null;
   selectedWorkspaceId: string;
   aiProviderSettings: AIProviderSettingsResponse | null;
   aiProviderUsage: AIProviderUsageLog[];
   isAIProviderLoading: boolean;
+  githubAutomationConfig: GitHubAutomationConfig | null;
+  repositoryAnalysis: RepositoryAnalysis | null;
+  isIntegrationLoading: boolean;
   onAuthChange: (auth: AuthContextResponse | null) => void;
   onRefreshAIProviders: () => void;
+  onRefreshIntegrations: () => void;
 }) {
   const [fullName, setFullName] = useState(auth?.user.fullName ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -3204,6 +3291,7 @@ function ProfilePage({
         <TabsList>
           <TabsTrigger value="account">Account</TabsTrigger>
           <TabsTrigger value="ai-providers">AI Providers</TabsTrigger>
+          <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
         <TabsContent value="account" className="space-y-5">
@@ -3235,6 +3323,16 @@ function ProfilePage({
             usage={aiProviderUsage}
             isLoading={isAIProviderLoading}
             onRefresh={onRefreshAIProviders}
+          />
+        </TabsContent>
+        <TabsContent value="integrations">
+          <AutomationRepositorySettings
+            workspaceId={selectedWorkspaceId}
+            role={auth.role}
+            config={githubAutomationConfig}
+            analysis={repositoryAnalysis}
+            isLoading={isIntegrationLoading}
+            onRefresh={onRefreshIntegrations}
           />
         </TabsContent>
         <TabsContent value="security">
@@ -3287,6 +3385,353 @@ const aiFeatureLabels: Record<AIProviderFeatureName, string> = {
   "requirement-impact": "Requirement Impact Analysis",
   "coverage-score": "Coverage Score",
 };
+
+function AutomationRepositorySettings({
+  workspaceId,
+  role,
+  config,
+  analysis,
+  isLoading,
+  onRefresh,
+}: {
+  workspaceId: string;
+  role: WorkspaceRole;
+  config: GitHubAutomationConfig | null;
+  analysis: RepositoryAnalysis | null;
+  isLoading: boolean;
+  onRefresh: () => void;
+}) {
+  const canManage = role === "Owner" || role === "Admin";
+  const [form, setForm] = useState({
+    token: "",
+    owner: config?.owner ?? "",
+    repo: config?.repo ?? "",
+    defaultBranch: config?.defaultBranch ?? "main",
+    testFolderPath: config?.testFolderPath ?? "tests/e2e",
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isOverrideOpen, setIsOverrideOpen] = useState(false);
+  const [overrideForm, setOverrideForm] = useState({
+    language: analysis?.language ?? "TypeScript",
+    framework: analysis?.framework ?? "Playwright Test Runner",
+    buildTool: analysis?.buildTool ?? "npm",
+    testFolderPath: analysis?.testFolderPath ?? config?.testFolderPath ?? "tests/e2e",
+    pageObjectFolderPath: analysis?.pageObjectFolderPath ?? "",
+    pattern: analysis?.pattern ?? "Direct Playwright",
+    namingConvention: analysis?.namingConvention ?? "*.spec.ts",
+    importStyle: analysis?.importStyle ?? "@playwright/test",
+    usesPageObjectModel: analysis?.usesPageObjectModel ?? false,
+    usesFixtures: analysis?.usesFixtures ?? false,
+  });
+
+  useEffect(() => {
+    setForm((current) => ({
+      token: "",
+      owner: config?.owner ?? current.owner,
+      repo: config?.repo ?? current.repo,
+      defaultBranch: config?.defaultBranch ?? (current.defaultBranch || "main"),
+      testFolderPath: config?.testFolderPath ?? (current.testFolderPath || "tests/e2e"),
+    }));
+  }, [config]);
+
+  useEffect(() => {
+    setOverrideForm({
+      language: analysis?.language ?? "TypeScript",
+      framework: analysis?.framework ?? "Playwright Test Runner",
+      buildTool: analysis?.buildTool ?? "npm",
+      testFolderPath: analysis?.testFolderPath ?? config?.testFolderPath ?? "tests/e2e",
+      pageObjectFolderPath: analysis?.pageObjectFolderPath ?? "",
+      pattern: analysis?.pattern ?? "Direct Playwright",
+      namingConvention: analysis?.namingConvention ?? "*.spec.ts",
+      importStyle: analysis?.importStyle ?? "@playwright/test",
+      usesPageObjectModel: analysis?.usesPageObjectModel ?? false,
+      usesFixtures: analysis?.usesFixtures ?? false,
+    });
+  }, [analysis, config]);
+
+  const saveConfig = async () => {
+    if (!workspaceId) {
+      toast.error("Select a workspace first.");
+      return;
+    }
+    if (!canManage) {
+      toast.error("You do not have permission to configure integrations.");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      await projectApi.connectGitHubAutomation({
+        workspaceId,
+        token: form.token,
+        owner: form.owner,
+        repo: form.repo,
+        defaultBranch: form.defaultBranch || "main",
+        testFolderPath: form.testFolderPath || "tests/e2e",
+      });
+      setForm((current) => ({ ...current, token: "" }));
+      toast.success("GitHub automation repository connected");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to connect GitHub repository");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const testConnection = async () => {
+    if (!workspaceId) return;
+    try {
+      setIsTesting(true);
+      const result = await projectApi.testGitHubAutomationConnection(workspaceId);
+      toast.success(`Connected to ${result.repository}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "GitHub connection failed");
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const analyzeRepository = async () => {
+    if (!workspaceId) return;
+    try {
+      setIsAnalyzing(true);
+      const nextAnalysis = await projectApi.analyzeGitHubRepository(workspaceId);
+      toast.success(`Repository analyzed with ${nextAnalysis.confidenceScore}% confidence`);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Repository analysis failed");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const saveOverride = async () => {
+    try {
+      await projectApi.overrideGitHubRepositoryAnalysis({
+        workspaceId,
+        ...overrideForm,
+      });
+      toast.success("Repository analysis override saved");
+      setIsOverrideOpen(false);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save repository analysis override");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <Card className="app-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">Automation Repository</Badge>
+            <h2 className="font-display text-2xl font-semibold">GitHub Automation Repository</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Connect a GitHub automation repository so AI QA Copilot can create a feature branch, add generated Playwright specs, and raise a pull request for review.
+            </p>
+          </div>
+          {config ? (
+            <Badge variant="outline" className="border-success/40 bg-success/10 text-success">Configured</Badge>
+          ) : (
+            <Badge variant="outline">Not configured</Badge>
+          )}
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_.85fr]">
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                value={form.owner}
+                disabled={!canManage}
+                onChange={(event) => setForm((value) => ({ ...value, owner: event.target.value }))}
+                placeholder="Repository owner, e.g. dksable"
+              />
+              <Input
+                value={form.repo}
+                disabled={!canManage}
+                onChange={(event) => setForm((value) => ({ ...value, repo: event.target.value }))}
+                placeholder="Repository name, e.g. ai-qa-automation"
+              />
+              <Input
+                value={form.defaultBranch}
+                disabled={!canManage}
+                onChange={(event) => setForm((value) => ({ ...value, defaultBranch: event.target.value }))}
+                placeholder="Default branch, e.g. main"
+              />
+              <Input
+                value={form.testFolderPath}
+                disabled={!canManage}
+                onChange={(event) => setForm((value) => ({ ...value, testFolderPath: event.target.value }))}
+                placeholder="Test folder path, e.g. tests/e2e"
+              />
+            </div>
+            <Input
+              type="password"
+              value={form.token}
+              disabled={!canManage}
+              onChange={(event) => setForm((value) => ({ ...value, token: event.target.value }))}
+              placeholder={config?.tokenMasked ? `GitHub token (${config.tokenMasked})` : "GitHub Personal Access Token"}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={saveConfig} disabled={!canManage || isSaving || !form.token || !form.owner || !form.repo}>
+                {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />}
+                Save GitHub Config
+              </Button>
+              <Button variant="outline" onClick={testConnection} disabled={!config || isTesting}>
+                {isTesting ? <Loader2 className="size-4 animate-spin" /> : <GitBranch className="size-4" />}
+                Test Connection
+              </Button>
+              <Button variant="outline" onClick={analyzeRepository} disabled={!config || isAnalyzing}>
+                {isAnalyzing ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                Analyze Repository
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-border/40 bg-surface/40 p-4">
+            <h3 className="font-semibold">Current Target</h3>
+            {isLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : config ? (
+              <div className="space-y-2 text-sm">
+                <p><span className="text-muted-foreground">Repository:</span> {config.owner}/{config.repo}</p>
+                <p><span className="text-muted-foreground">Branch:</span> {config.defaultBranch}</p>
+                <p><span className="text-muted-foreground">Folder:</span> {config.testFolderPath}</p>
+                <p><span className="text-muted-foreground">Token:</span> {config.tokenMasked}</p>
+              </div>
+            ) : (
+              <p className="text-sm leading-6 text-muted-foreground">Please configure GitHub repository integration first.</p>
+            )}
+            <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">
+              Tokens are encrypted in the backend and never displayed after saving. AI QA Copilot always creates a branch and pull request; it never pushes directly to the default branch.
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="app-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-xl font-semibold">Detected Repository Setup</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              AI QA Copilot uses this analysis to choose the target folder and describe the generated Pull Request.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {analysis && (
+              <Badge
+                variant="outline"
+                className={analysis.confidenceScore < 70 ? "border-warning/40 bg-warning/10 text-warning" : "border-success/40 bg-success/10 text-success"}
+              >
+                {analysis.confidenceScore}% confidence
+              </Badge>
+            )}
+            <Dialog open={isOverrideOpen} onOpenChange={setIsOverrideOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={!analysis}>
+                  <Pencil className="size-3.5" />
+                  Manual Override
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Override Repository Analysis</DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Select value={overrideForm.language} onValueChange={(language) => setOverrideForm((value) => ({ ...value, language }))}>
+                      <SelectTrigger><SelectValue placeholder="Language" /></SelectTrigger>
+                      <SelectContent>{["TypeScript", "JavaScript", "Java", "Unknown"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={overrideForm.framework} onValueChange={(framework) => setOverrideForm((value) => ({ ...value, framework }))}>
+                      <SelectTrigger><SelectValue placeholder="Framework" /></SelectTrigger>
+                      <SelectContent>{["Playwright", "Playwright Test Runner", "Java Playwright", "Custom Playwright setup", "Unknown"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Input value={overrideForm.testFolderPath} onChange={(event) => setOverrideForm((value) => ({ ...value, testFolderPath: event.target.value }))} placeholder="Test folder path" />
+                    <Input value={overrideForm.pageObjectFolderPath} onChange={(event) => setOverrideForm((value) => ({ ...value, pageObjectFolderPath: event.target.value }))} placeholder="Page object folder path" />
+                    <Select value={overrideForm.pattern} onValueChange={(pattern) => setOverrideForm((value) => ({ ...value, pattern }))}>
+                      <SelectTrigger><SelectValue placeholder="Pattern" /></SelectTrigger>
+                      <SelectContent>{["Page Object Model", "Fixtures", "Direct Playwright", "Custom"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={overrideForm.buildTool} onValueChange={(buildTool) => setOverrideForm((value) => ({ ...value, buildTool }))}>
+                      <SelectTrigger><SelectValue placeholder="Build tool" /></SelectTrigger>
+                      <SelectContent>{["npm", "Maven", "Gradle", "Unknown"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Input value={overrideForm.namingConvention} onChange={(event) => setOverrideForm((value) => ({ ...value, namingConvention: event.target.value }))} placeholder="Naming convention" />
+                    <Input value={overrideForm.importStyle} onChange={(event) => setOverrideForm((value) => ({ ...value, importStyle: event.target.value }))} placeholder="Import style" />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setIsOverrideOpen(false)}>Cancel</Button>
+                    <Button onClick={saveOverride}>Save Override</Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        {!analysis ? (
+          <p className="mt-5 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+            No repository analysis yet. Connect GitHub and click Analyze Repository.
+          </p>
+        ) : (
+          <div className="mt-5 space-y-4">
+            {analysis.confidenceScore < 70 && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                Confidence is low. Please review the detected language, folder, and pattern before pushing generated tests.
+              </div>
+            )}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniStat label="Framework" value={analysis.framework} />
+              <MiniStat label="Language" value={analysis.language} />
+              <MiniStat label="Build Tool" value={analysis.buildTool} />
+              <MiniStat label="Pattern" value={analysis.pattern} />
+              <MiniStat label="Test Folder" value={analysis.testFolderPath} />
+              <MiniStat label="Page Objects" value={analysis.pageObjectFolderPath || "Not detected"} />
+              <MiniStat label="POM" value={analysis.usesPageObjectModel ? "Yes" : "No"} />
+              <MiniStat label="Fixtures" value={analysis.usesFixtures ? "Yes" : "No"} />
+            </div>
+            <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+              <h4 className="text-sm font-semibold">Scanned Files</h4>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {analysis.scannedFiles.slice(0, 18).map((file) => (
+                  <Badge key={file} variant="outline" className="font-mono text-[11px]">{file}</Badge>
+                ))}
+                {analysis.scannedFiles.length > 18 && <Badge variant="outline">+{analysis.scannedFiles.length - 18} more</Badge>}
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="app-card p-5">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary"><Github className="size-5" /></span>
+            <div>
+              <h3 className="font-semibold">GitHub</h3>
+              <p className="text-sm text-muted-foreground">MVP support for branches, files, and pull requests.</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="app-card p-5 opacity-75">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex size-10 items-center justify-center rounded-lg bg-surface/80 text-muted-foreground"><GitBranch className="size-5" /></span>
+              <div>
+                <h3 className="font-semibold">Bitbucket</h3>
+                <p className="text-sm text-muted-foreground">Repository automation integration planned.</p>
+              </div>
+            </div>
+            <Badge variant="outline">Coming Soon</Badge>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
 
 function AIProvidersSettings({
   workspaceId,
@@ -3559,10 +4004,14 @@ function LandingPage({
   onPricing: () => void;
 }) {
   const heroFeatures = [
-    { icon: Sparkles, label: "AI-powered QA lifecycle platform" },
-    { icon: ClipboardCheck, label: "Manual and automated QA readiness" },
-    { icon: Gauge, label: "Coverage, governance, and analytics" },
-    { icon: Code2, label: "Repository integrations planned" },
+    { icon: Sparkles, label: "AI Test Case Generation" },
+    { icon: ClipboardCheck, label: "Manual Test Execution" },
+    { icon: Bot, label: "AI Chat with Requirements" },
+    { icon: ShieldCheck, label: "Review & Approval Workflow" },
+    { icon: Code2, label: "Playwright Test Generation" },
+    { icon: BarChart3, label: "Analytics & Reporting" },
+    { icon: Users, label: "Team Collaboration" },
+    { icon: GitBranch, label: "Enterprise Integrations" },
   ];
   const painPoints = [
     "Manual test case creation",
@@ -3624,16 +4073,23 @@ function LandingPage({
       icon: BarChart3,
     },
     {
+      title: "Smart Repository Analysis",
+      description: "Analyze GitHub or Bitbucket automation repositories to detect framework, language, folder structure, Page Object Model usage, and coding conventions before generating Playwright tests.",
+      icon: GitBranch,
+      enterprise: true,
+    },
+    {
       title: "Jira Integration",
       description: "Coming soon for issue sync and traceability.",
       icon: Rocket,
       comingSoon: true,
     },
     {
-      title: "GitHub/Bitbucket Integration",
-      description: "Coming soon to create Playwright files and Pull Requests from generated tests.",
-      icon: Code2,
+      title: "GitHub & Bitbucket Repository Integration",
+      description: "Generate Playwright tests, create feature branches, and raise Pull Requests directly into connected automation repositories.",
+      icon: GitPullRequest,
       comingSoon: true,
+      enterprise: true,
     },
     {
       title: "AI Provider Flexibility",
@@ -3687,16 +4143,20 @@ function LandingPage({
       description: "Govern versions and approvals",
     },
     {
-      title: "Manual Test Execution",
-      description: "Run tests and track outcomes",
+      title: "Review & Approval",
+      description: "Govern versions and approvals",
     },
     {
-      title: "Playwright Test Generation",
-      description: "Prepare automation skeletons",
+      title: "Smart Repository Analysis",
+      description: "Understand automation repo style",
     },
     {
-      title: "GitHub/Bitbucket Pull Request",
-      description: "Planned repo-ready PR workflow",
+      title: "Generate Matching Playwright Tests",
+      description: "Follow existing repo patterns",
+    },
+    {
+      title: "Create Pull Request",
+      description: "Branch and PR for review",
     },
     {
       title: "Analytics & Reports",
@@ -3705,7 +4165,7 @@ function LandingPage({
   ];
   const integrations = [
     { title: "Jira Integration", description: "Issue traceability and QA workflow sync.", icon: Rocket, status: "Coming Soon" },
-    { title: "GitHub Repository", description: "Generate Playwright files and Pull Requests.", icon: Code2, status: "Coming Soon" },
+    { title: "GitHub Repository", description: "Analyze automation structure, generate Playwright files, and raise Pull Requests.", icon: Github, status: "Enterprise" },
     { title: "Bitbucket Repository", description: "Connect automation repos and branch workflows.", icon: GitCompare, status: "Coming Soon" },
     { title: "Azure DevOps", description: "Enterprise delivery workflow support.", icon: Boxes, status: "Future" },
     { title: "CI/CD Pipeline", description: "Automation execution and release pipeline signals.", icon: TrendingUp, status: "Future" },
@@ -3751,6 +4211,28 @@ function LandingPage({
       icon: ShieldCheck,
     },
   ];
+  const repositoryIntelligence = [
+    {
+      title: "Detect Framework",
+      description: "Detect Playwright setup from config files and dependencies.",
+      icon: Search,
+    },
+    {
+      title: "Detect Language",
+      description: "Identify JavaScript, TypeScript, or Java automation projects.",
+      icon: Code2,
+    },
+    {
+      title: "Detect Project Pattern",
+      description: "Understand folder structure, naming conventions, fixtures, and Page Object Model usage.",
+      icon: FolderKanban,
+    },
+    {
+      title: "Generate Matching Tests",
+      description: "Create Playwright tests that follow the existing repository style.",
+      icon: GitPullRequest,
+    },
+  ];
   const faqs = [
     ["What is AI QA Copilot?", "AI QA Copilot is an AI-powered QA lifecycle platform for test design, review, execution, collaboration, analytics, and reporting."],
     ["Can it generate Playwright tests?", "Yes. The product generates Playwright test skeletons today, with repository Pull Request workflows planned for GitHub and Bitbucket."],
@@ -3765,13 +4247,14 @@ function LandingPage({
       <section className="grid min-h-[calc(100vh-7rem)] items-center gap-10 lg:grid-cols-[1fr_.95fr]">
         <div>
           <Badge variant="outline" className="mb-5 border-primary/30 bg-primary/10 text-primary">
-            <Sparkles className="mr-1 size-3" /> Enterprise QA Intelligence
+            <Sparkles className="mr-1 size-3" /> Enterprise AI Quality Engineering
           </Badge>
           <h1 className="max-w-4xl font-display text-4xl font-bold leading-tight md:text-6xl">
-            AI-Powered QA Lifecycle Platform
+            <span className="block">AI QA Copilot</span>
+            <span className="block text-primary">AI-Powered Quality Engineering Platform</span>
           </h1>
-          <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">
-            Generate better test cases, govern QA workflows, execute manual tests, prepare Playwright automation, and give leaders clear quality visibility.
+          <p className="mt-6 max-w-3xl text-base leading-7 text-muted-foreground md:text-lg md:leading-8">
+            AI QA Copilot is an AI-powered Quality Engineering Platform that helps QA, Product, and Engineering teams generate, review, execute, analyze, and manage QA work across the complete software testing lifecycle.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button size="lg" className="bg-gradient-primary text-primary-foreground shadow-glow" onClick={onStart}>
@@ -3780,16 +4263,23 @@ function LandingPage({
             </Button>
             <Button size="lg" variant="outline" onClick={onBookDemo}>
               <CalendarDays className="size-4" />
-              Book Demo
+              Book a Demo
+            </Button>
+            <Button size="lg" variant="ghost" onClick={() => document.getElementById("core-features")?.scrollIntoView({ behavior: "smooth" })}>
+              <Layers3 className="size-4" />
+              View Features
             </Button>
           </div>
-          <div className="mt-8 grid gap-3 sm:grid-cols-2">
+          <p className="mt-5 max-w-3xl text-sm font-medium leading-6 text-foreground/80">
+            Built for QA Engineers, QA Leads, Product Managers, Engineering Managers, Delivery Managers, and Enterprise Teams.
+          </p>
+          <div className="mt-7 flex max-w-4xl flex-wrap gap-2.5">
             {heroFeatures.map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-3 rounded-lg border border-border/50 bg-card/60 p-3">
-                <span className="flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  <Icon className="size-4" />
+              <div key={label} className="flex items-center gap-2 rounded-full border border-border/50 bg-card/70 px-3.5 py-2 shadow-sm backdrop-blur">
+                <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Icon className="size-3.5" />
                 </span>
-                <span className="text-sm font-medium">{label}</span>
+                <span className="text-xs font-semibold md:text-sm">{label}</span>
               </div>
             ))}
           </div>
@@ -3813,23 +4303,50 @@ function LandingPage({
       </LandingSection>
 
       <LandingSection
+        id="core-features"
         eyebrow="Core Features"
         title="What AI QA Copilot Can Do"
         description="A complete QA lifecycle platform for generating test assets, managing review, executing tests, collaborating across teams, and preparing for automation workflows."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {features.map(({ title, description, icon: Icon, comingSoon }) => (
+          {features.map(({ title, description, icon: Icon, comingSoon, enterprise }) => (
             <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
               <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
                 <Icon className="size-4" />
               </div>
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-sm font-semibold">{title}</h3>
-                {comingSoon && <Badge variant="outline" className="shrink-0 text-[10px]">Coming Soon</Badge>}
+                <div className="flex shrink-0 flex-wrap gap-1">
+                  {enterprise && <Badge variant="outline" className="text-[10px]">Enterprise</Badge>}
+                  {comingSoon && <Badge variant="outline" className="text-[10px]">Coming Soon</Badge>}
+                </div>
               </div>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
             </div>
           ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="Repository Intelligence"
+        title="Repository Intelligence for Automation Teams"
+        description="AI QA Copilot understands your existing automation framework before generating new test files."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {repositoryIntelligence.map(({ title, description, icon: Icon }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5">
+              <div className="mb-4 flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Icon className="size-5" />
+              </div>
+              <h3 className="font-semibold">{title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 rounded-lg border border-primary/30 bg-primary/10 p-5">
+          <p className="max-w-5xl text-sm leading-6 text-muted-foreground">
+            <span className="font-semibold text-foreground">Smart Repository Analysis</span> helps automation teams avoid generic generated code. AI QA Copilot adapts to the existing test framework, language, and coding standards, making generated Playwright tests easier to review, maintain, and merge.
+          </p>
         </div>
       </LandingSection>
 
@@ -4001,18 +4518,20 @@ function LandingPage({
 }
 
 function LandingSection({
+  id,
   eyebrow,
   title,
   description,
   children,
 }: {
+  id?: string;
   eyebrow: string;
   title: string;
   description: string;
   children: ReactNode;
 }) {
   return (
-    <section>
+    <section id={id}>
       <div className="mb-8 max-w-3xl">
         <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
           {eyebrow}
@@ -6442,11 +6961,27 @@ function Results({
   plan,
   onExport,
   isExporting,
+  githubConfig,
+  repositoryAnalysis,
+  isPushingPlaywright,
+  onPushPlaywright,
 }: {
   plan: TestPlan;
   onExport?: (format: ExportFormat) => void;
   isExporting?: boolean;
+  githubConfig?: GitHubAutomationConfig | null;
+  repositoryAnalysis?: RepositoryAnalysis | null;
+  isPushingPlaywright?: boolean;
+  onPushPlaywright?: (fileName: string) => void;
 }) {
+  const [isGitHubDialogOpen, setIsGitHubDialogOpen] = useState(false);
+  const defaultSpecExtension = repositoryAnalysis?.language === "JavaScript" ? "js" : "ts";
+  const [githubFileName, setGithubFileName] = useState(`generated-playwright.spec.${defaultSpecExtension}`);
+  useEffect(() => {
+    setGithubFileName((current) => current === "generated-playwright.spec.ts" || current === "generated-playwright.spec.js"
+      ? `generated-playwright.spec.${defaultSpecExtension}`
+      : current);
+  }, [defaultSpecExtension]);
   const copyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(plan, null, 2));
     toast.success("Copied JSON to clipboard");
@@ -6571,9 +7106,71 @@ function Results({
           <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950">
             <div className="flex items-center justify-between border-b border-slate-700/80 px-4 py-2">
               <span className="font-mono text-xs text-slate-300">playwright.spec.ts</span>
-              <Button variant="ghost" size="sm" className="text-slate-200 hover:bg-slate-800 hover:text-white" onClick={copyPlaywright}>
-                <Copy className="size-3.5" /> Copy
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {onPushPlaywright && (
+                  <Dialog open={isGitHubDialogOpen} onOpenChange={setIsGitHubDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="ghost" size="sm" className="text-slate-200 hover:bg-slate-800 hover:text-white">
+                        <Github className="size-3.5" /> Push to GitHub
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Push Playwright Test to GitHub</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        {githubConfig ? (
+                          <>
+                            <div className="rounded-lg border border-border/40 bg-surface/40 p-3 text-sm">
+                              <p className="font-medium">{githubConfig.owner}/{githubConfig.repo}</p>
+                              <p className="mt-1 text-muted-foreground">A new branch and pull request will be created from <span className="font-mono">{githubConfig.defaultBranch}</span>.</p>
+                            </div>
+                            <Input
+                              value={githubFileName}
+                              onChange={(event) => setGithubFileName(event.target.value)}
+                              placeholder="login.spec.ts"
+                            />
+                            <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">
+                              Target path: <span className="font-mono text-foreground">{repositoryAnalysis?.testFolderPath || githubConfig.testFolderPath}/{githubFileName || `file.spec.${defaultSpecExtension}`}</span>
+                            </p>
+                            {repositoryAnalysis && (
+                              <div className="grid gap-2 rounded-md border border-border/40 bg-surface/40 p-3 text-xs text-muted-foreground sm:grid-cols-2">
+                                <span>Framework: <strong className="text-foreground">{repositoryAnalysis.framework}</strong></span>
+                                <span>Language: <strong className="text-foreground">{repositoryAnalysis.language}</strong></span>
+                                <span>Pattern: <strong className="text-foreground">{repositoryAnalysis.pattern}</strong></span>
+                                <span>Confidence: <strong className="text-foreground">{repositoryAnalysis.confidenceScore}%</strong></span>
+                              </div>
+                            )}
+                            <p className="text-xs leading-5 text-muted-foreground">
+                              If this file already exists, AI QA Copilot will stop and ask you to rename it. It will not overwrite silently.
+                            </p>
+                            <div className="flex justify-end gap-2">
+                              <Button variant="outline" onClick={() => setIsGitHubDialogOpen(false)}>Cancel</Button>
+                              <Button
+                                onClick={() => {
+                                  onPushPlaywright(githubFileName);
+                                  setIsGitHubDialogOpen(false);
+                                }}
+                                disabled={isPushingPlaywright || !githubFileName}
+                              >
+                                {isPushingPlaywright ? <Loader2 className="size-4 animate-spin" /> : <GitBranch className="size-4" />}
+                                Create PR
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+                            Please configure GitHub repository integration first in Settings → Integrations → Automation Repository.
+                          </div>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
+                <Button variant="ghost" size="sm" className="text-slate-200 hover:bg-slate-800 hover:text-white" onClick={copyPlaywright}>
+                  <Copy className="size-3.5" /> Copy
+                </Button>
+              </div>
             </div>
             <pre className="max-h-[520px] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-100">
               <code>{plan.playwright}</code>

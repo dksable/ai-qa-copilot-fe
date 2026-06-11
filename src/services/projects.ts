@@ -231,6 +231,85 @@ export interface SaveAIProviderInput {
   fallbackToDefault?: boolean;
 }
 
+export interface GitHubAutomationConfig {
+  id: string;
+  workspaceId: string;
+  provider: "github";
+  tokenMasked: string;
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  testFolderPath: string;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveGitHubAutomationConfigInput {
+  workspaceId: string;
+  token: string;
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  testFolderPath: string;
+}
+
+export interface PushPlaywrightToGitHubInput {
+  workspaceId: string;
+  fileName: string;
+  playwrightCode: string;
+  requirementTitle: string;
+  projectName?: string;
+  moduleName?: string;
+  coverageScore?: number;
+  generatedBy?: string;
+  version?: number | string;
+}
+
+export interface PushPlaywrightToGitHubResult {
+  branchName: string;
+  filePath: string;
+  fileUrl: string;
+  pullRequestUrl: string;
+  pullRequestNumber: number;
+}
+
+export type RepositoryAnalysisLanguage = "TypeScript" | "JavaScript" | "Java" | "Unknown";
+export type RepositoryAnalysisFramework =
+  | "Playwright"
+  | "Playwright Test Runner"
+  | "Java Playwright"
+  | "Custom Playwright setup"
+  | "Unknown";
+export type RepositoryAnalysisBuildTool = "npm" | "Maven" | "Gradle" | "Unknown";
+export type RepositoryAnalysisPattern = "Page Object Model" | "Fixtures" | "Direct Playwright" | "Custom";
+
+export interface RepositoryAnalysis {
+  id: string;
+  workspaceId: string;
+  integrationId: string;
+  provider: "github";
+  repoOwner: string;
+  repoName: string;
+  branch: string;
+  framework: RepositoryAnalysisFramework;
+  language: RepositoryAnalysisLanguage;
+  buildTool: RepositoryAnalysisBuildTool;
+  testFolderPath: string;
+  pageObjectFolderPath?: string;
+  usesPageObjectModel: boolean;
+  usesFixtures: boolean;
+  namingConvention: string;
+  importStyle: string;
+  pattern: RepositoryAnalysisPattern;
+  confidenceScore: number;
+  scannedFiles: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Plan {
   id: PlanId;
   name: string;
@@ -1103,6 +1182,37 @@ export const projectApi = {
     apiRequest<AIProviderFeatureMapping[]>("/api/ai-providers/feature-mapping", {
       method: "PUT",
       body: JSON.stringify({ workspaceId, mappings }),
+    }),
+  getGitHubAutomationConfig: (workspaceId: string) =>
+    apiRequest<GitHubAutomationConfig | null>(`/api/integrations/github/config?workspaceId=${encodeURIComponent(workspaceId)}`),
+  connectGitHubAutomation: (input: SaveGitHubAutomationConfigInput) =>
+    apiRequest<GitHubAutomationConfig>("/api/integrations/github/connect", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  testGitHubAutomationConnection: (workspaceId: string) =>
+    apiRequest<{ ok: boolean; repository: string; defaultBranch: string; url: string }>("/api/integrations/github/test-connection", {
+      method: "POST",
+      body: JSON.stringify({ workspaceId }),
+    }),
+  analyzeGitHubRepository: (workspaceId: string) =>
+    apiRequest<RepositoryAnalysis>("/api/integrations/github/analyze-repository", {
+      method: "POST",
+      body: JSON.stringify({ workspaceId }),
+    }),
+  getGitHubRepositoryAnalysis: (workspaceId: string) =>
+    apiRequest<RepositoryAnalysis | null>(`/api/integrations/github/analysis?workspaceId=${encodeURIComponent(workspaceId)}`),
+  overrideGitHubRepositoryAnalysis: (
+    input: Partial<Pick<RepositoryAnalysis, "framework" | "language" | "buildTool" | "testFolderPath" | "pageObjectFolderPath" | "usesPageObjectModel" | "usesFixtures" | "namingConvention" | "importStyle" | "pattern">> & { workspaceId: string },
+  ) =>
+    apiRequest<RepositoryAnalysis>("/api/integrations/github/analysis/override", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  pushPlaywrightToGitHub: (input: PushPlaywrightToGitHubInput) =>
+    apiRequest<PushPlaywrightToGitHubResult>("/api/integrations/github/push-playwright-test", {
+      method: "POST",
+      body: JSON.stringify(input),
     }),
   getAnalyticsSummary: (filters: AnalyticsFilters = {}) =>
     apiRequest<AnalyticsSummary>(`/api/analytics/summary${analyticsQueryString(filters)}`),
