@@ -38,7 +38,7 @@ Requirement -> AI Test Generation -> Review & Approval -> Manual Test Execution
 - Node.js
 - Express
 - TypeScript
-- File-backed POC data store
+- MongoDB-backed POC data store when `MONGODB_URI` is configured, with local JSON file fallback for development
 - JWT authentication
 - bcrypt password hashing
 - Groq/default AI provider integration
