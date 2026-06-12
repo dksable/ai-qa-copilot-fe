@@ -338,6 +338,31 @@ export interface RepositoryAISuggestion {
   recommendedPrAction: string;
 }
 
+export interface RepositoryGeneratedUpdate {
+  id: string;
+  syncId: string;
+  testFilePath: string;
+  oldCode: string;
+  newCode: string;
+  impactReason: string;
+  changedLocatorOrFlow: string;
+  confidenceScore: number;
+  riskLevel: RepositoryRiskLevel;
+  suggestedAction: RepositorySuggestedAction | "Needs Manual Review";
+  createdAt: string;
+}
+
+export interface RepositoryPrPreview {
+  filesToAdd: string[];
+  filesToUpdate: string[];
+  branchName: string;
+  title: string;
+  description: string;
+  riskLevel: RepositoryRiskLevel;
+  confidenceScore: number;
+  createdAt: string;
+}
+
 export interface RepositorySync {
   id: string;
   workspaceId: string;
@@ -351,9 +376,14 @@ export interface RepositorySync {
   changedFiles: RepositoryChangedFile[];
   impactedTests: RepositoryImpactedTest[];
   aiSuggestions: RepositoryAISuggestion[];
+  generatedUpdates?: RepositoryGeneratedUpdate[];
+  prPreview?: RepositoryPrPreview;
+  updatedFiles?: string[];
+  branchName?: string;
   riskLevel: RepositoryRiskLevel;
   status: RepositorySyncStatus;
   prUrl?: string;
+  prStatus?: "Not Created" | "Preview Ready" | "Created" | "Failed";
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -664,7 +694,16 @@ export interface TestExecution {
   actualResult: string;
   comments: string;
   screenshotUrl?: string;
+  videoUrl?: string;
+  logUrl?: string;
   bugId?: string;
+  jiraBugId?: string;
+  jiraBugUrl?: string;
+  executionTime?: number;
+  browser?: "Chrome" | "Firefox" | "Safari" | "Edge";
+  operatingSystem?: "Windows" | "macOS" | "Linux" | "Android" | "iOS";
+  buildNumber?: string;
+  environment?: TestRunEnvironment;
   executedBy?: string;
   executedAt?: string;
   createdAt: string;
@@ -686,6 +725,8 @@ export interface TestExecutionHistoryItem {
   comment?: string;
   actualResult?: string;
   bugId?: string;
+  jiraBugId?: string;
+  jiraBugUrl?: string;
   createdAt: string;
 }
 
@@ -700,6 +741,12 @@ export interface TestExecutionDashboard {
   passFailChart: Array<{ name: string; value: number }>;
   dailyExecutionTrend: Array<{ name: string; executions: number }>;
   testerSummary: Array<{ tester: string; total: number; passed: number; failed: number }>;
+  failedTestsWithEvidence?: number;
+  testsLinkedToBugs?: number;
+  averageExecutionTime?: number;
+  browserWiseFailures?: Array<{ browser: string; failures: number }>;
+  osWiseFailures?: Array<{ operatingSystem: string; failures: number }>;
+  buildWisePassRate?: Array<{ buildNumber: string; passRate: number }>;
 }
 
 export interface CreateTestRunInput {
@@ -1269,6 +1316,15 @@ export const projectApi = {
     apiRequest<RepositorySync>(`/api/integrations/github/sync/${syncId}`),
   generateGitHubRepositorySyncSuggestions: (syncId: string) =>
     apiRequest<RepositorySync>(`/api/integrations/github/sync/${syncId}/generate-suggestions`, { method: "POST" }),
+  generateGitHubRepositorySyncUpdates: (syncId: string) =>
+    apiRequest<RepositorySync>(`/api/integrations/github/sync/${syncId}/generate-updates`, { method: "POST" }),
+  getGitHubRepositorySyncPrPreview: (syncId: string) =>
+    apiRequest<RepositoryPrPreview>(`/api/integrations/github/sync/${syncId}/pr-preview`),
+  createGitHubRepositorySyncUpdatePr: (syncId: string) =>
+    apiRequest<RepositorySync & { pullRequest?: { pullRequestUrl: string; pullRequestNumber: number; branchName: string; updatedFiles: string[] } }>(
+      `/api/integrations/github/sync/${syncId}/create-update-pr`,
+      { method: "POST" },
+    ),
   createGitHubRepositorySyncPr: (syncId: string) =>
     apiRequest<RepositorySync & { pullRequest?: { pullRequestUrl: string; pullRequestNumber: number; branchName: string; reportPath: string } }>(
       `/api/integrations/github/sync/${syncId}/create-pr`,
@@ -1309,7 +1365,7 @@ export const projectApi = {
     apiRequest<TestExecution[]>(`/api/test-runs/${testRunId}/executions`),
   updateTestExecutionStatus: (
     executionId: string,
-    input: { status: TestExecutionStatus; actualResult?: string; comments?: string; screenshotUrl?: string; bugId?: string; updatedBy?: string },
+    input: Partial<Pick<TestExecution, "actualResult" | "comments" | "screenshotUrl" | "videoUrl" | "logUrl" | "bugId" | "jiraBugId" | "jiraBugUrl" | "executionTime" | "browser" | "operatingSystem" | "buildNumber" | "environment">> & { status: TestExecutionStatus; updatedBy?: string },
   ) =>
     apiRequest<TestExecution>(`/api/test-executions/${executionId}/status`, {
       method: "PATCH",
@@ -1317,7 +1373,7 @@ export const projectApi = {
     }),
   updateTestExecutionDetails: (
     executionId: string,
-    input: { actualResult?: string; comments?: string; screenshotUrl?: string; bugId?: string },
+    input: Partial<Pick<TestExecution, "actualResult" | "comments" | "screenshotUrl" | "videoUrl" | "logUrl" | "bugId" | "jiraBugId" | "jiraBugUrl" | "executionTime" | "browser" | "operatingSystem" | "buildNumber" | "environment">>,
   ) =>
     apiRequest<TestExecution>(`/api/test-executions/${executionId}/details`, {
       method: "PATCH",

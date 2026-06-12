@@ -175,6 +175,23 @@ import type {
   TestCoverageScoreAnalysis,
 } from "@/services/coverageScore";
 
+type ExecutionEvidenceDraft = {
+  status: TestExecutionStatus;
+  actualResult: string;
+  comments: string;
+  bugId: string;
+  jiraBugId: string;
+  jiraBugUrl: string;
+  screenshotUrl: string;
+  videoUrl: string;
+  logUrl: string;
+  executionTime: string;
+  browser: NonNullable<TestExecution["browser"]> | "";
+  operatingSystem: NonNullable<TestExecution["operatingSystem"]> | "";
+  buildNumber: string;
+  environment: NonNullable<TestExecution["environment"]> | "";
+};
+
 interface AnalyticsBundle {
   summary: AnalyticsSummary;
   coverage: AnalyticsCoverage;
@@ -451,8 +468,8 @@ export default function AppShell() {
     }
     try {
       setIsPushingPlaywright(true);
-      const moduleItem = projectDetail?.modules.find((item) => item.id === selectedModuleId);
-      const requirementItem = moduleItem?.requirements.find((item) => item.id === selectedRequirementId);
+      const moduleItem = (projectDetail?.modules ?? []).find((item) => item.id === selectedModuleId);
+      const requirementItem = (moduleItem?.requirements ?? []).find((item) => item.id === selectedRequirementId);
       const result = await projectApi.pushPlaywrightToGitHub({
         workspaceId,
         fileName,
@@ -708,6 +725,7 @@ export default function AppShell() {
             isAIProviderLoading={isAIProviderLoading}
             githubAutomationConfig={githubAutomationConfig}
             repositoryAnalysis={repositoryAnalysis}
+            repositorySyncs={repositorySyncs}
             isIntegrationLoading={isIntegrationLoading}
             onAuthChange={setAuth}
             onRefreshAIProviders={() => refreshAIProviders(selectedWorkspaceId || auth?.workspace?.id || "")}
@@ -974,12 +992,22 @@ export default function AppShell() {
               toast.success("Test run deleted");
               await refreshExecution("");
             }}
-            onUpdateExecution={async (execution, status, actualResult, comments, bugId) => {
+            onUpdateExecution={async (execution, draft) => {
               await projectApi.updateTestExecutionStatus(execution.id, {
-                status,
-                actualResult,
-                comments,
-                bugId,
+                status: draft.status,
+                actualResult: draft.actualResult,
+                comments: draft.comments,
+                bugId: draft.bugId,
+                jiraBugId: draft.jiraBugId,
+                jiraBugUrl: draft.jiraBugUrl,
+                screenshotUrl: draft.screenshotUrl,
+                videoUrl: draft.videoUrl,
+                logUrl: draft.logUrl,
+                executionTime: draft.executionTime ? Number(draft.executionTime) : undefined,
+                browser: draft.browser || undefined,
+                operatingSystem: draft.operatingSystem || undefined,
+                buildNumber: draft.buildNumber,
+                environment: draft.environment || undefined,
                 updatedBy: auth?.user.fullName ?? "Current User",
               });
               toast.success("Execution updated");
@@ -3264,6 +3292,7 @@ function ProfilePage({
   isAIProviderLoading,
   githubAutomationConfig,
   repositoryAnalysis,
+  repositorySyncs,
   isIntegrationLoading,
   onAuthChange,
   onRefreshAIProviders,
@@ -3276,6 +3305,7 @@ function ProfilePage({
   isAIProviderLoading: boolean;
   githubAutomationConfig: GitHubAutomationConfig | null;
   repositoryAnalysis: RepositoryAnalysis | null;
+  repositorySyncs: RepositorySync[];
   isIntegrationLoading: boolean;
   onAuthChange: (auth: AuthContextResponse | null) => void;
   onRefreshAIProviders: () => void;
@@ -3425,7 +3455,9 @@ function AutomationRepositorySettings({
   const [isSyncing, setIsSyncing] = useState(false);
   const [activeSyncId, setActiveSyncId] = useState("");
   const [isGeneratingSyncSuggestions, setIsGeneratingSyncSuggestions] = useState(false);
+  const [isGeneratingSyncUpdates, setIsGeneratingSyncUpdates] = useState(false);
   const [isCreatingSyncPr, setIsCreatingSyncPr] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isOverrideOpen, setIsOverrideOpen] = useState(false);
   const [overrideForm, setOverrideForm] = useState({
     language: analysis?.language ?? "TypeScript",
@@ -3569,11 +3601,28 @@ function AutomationRepositorySettings({
     }
   };
 
+  const generateSyncUpdates = async () => {
+    if (!activeSync) return;
+    try {
+      setIsGeneratingSyncUpdates(true);
+      await projectApi.generateGitHubRepositorySyncUpdates(activeSync.id);
+      toast.success("Playwright update preview generated");
+      setIsPreviewOpen(true);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate Playwright updates");
+    } finally {
+      setIsGeneratingSyncUpdates(false);
+    }
+  };
+
   const createSyncPr = async () => {
     if (!activeSync) return;
     try {
       setIsCreatingSyncPr(true);
-      const updated = await projectApi.createGitHubRepositorySyncPr(activeSync.id);
+      const updated = activeSync.prPreview
+        ? await projectApi.createGitHubRepositorySyncUpdatePr(activeSync.id)
+        : await projectApi.createGitHubRepositorySyncPr(activeSync.id);
       toast.success(
         <span>
           Repository Sync PR created:{" "}
@@ -3827,7 +3876,15 @@ function AutomationRepositorySettings({
               {isGeneratingSyncSuggestions ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               Generate Suggestions
             </Button>
-            <Button onClick={createSyncPr} disabled={!activeSync?.aiSuggestions.length || isCreatingSyncPr}>
+            <Button variant="outline" onClick={generateSyncUpdates} disabled={!activeSync || isGeneratingSyncUpdates}>
+              {isGeneratingSyncUpdates ? <Loader2 className="size-4 animate-spin" /> : <Code2 className="size-4" />}
+              Generate Updates
+            </Button>
+            <Button variant="outline" onClick={() => setIsPreviewOpen(true)} disabled={!activeSync?.prPreview}>
+              <Eye className="size-4" />
+              PR Preview
+            </Button>
+            <Button onClick={createSyncPr} disabled={!(activeSync?.prPreview || activeSync?.aiSuggestions.length) || isCreatingSyncPr}>
               {isCreatingSyncPr ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
               Create Update PR
             </Button>
@@ -3916,6 +3973,79 @@ function AutomationRepositorySettings({
                 <p className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground lg:col-span-2">Generate AI suggestions after syncing the repository.</p>
               )}
             </div>
+            {activeSync.prPreview && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h4 className="font-semibold">PR Preview Ready</h4>
+                    <p className="mt-1 text-sm text-muted-foreground">{activeSync.prPreview.title}</p>
+                    <p className="mt-1 font-mono text-xs text-muted-foreground">{activeSync.prPreview.branchName}</p>
+                  </div>
+                  <Badge variant="outline" className={riskClass(activeSync.prPreview.riskLevel)}>{activeSync.prPreview.confidenceScore}% confidence</Badge>
+                </div>
+                <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
+                  <p><span className="text-muted-foreground">Files to add:</span> {activeSync.prPreview.filesToAdd.length}</p>
+                  <p><span className="text-muted-foreground">Files to update:</span> {activeSync.prPreview.filesToUpdate.length}</p>
+                </div>
+              </div>
+            )}
+            <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+              <DialogContent className="max-w-6xl">
+                <DialogHeader>
+                  <DialogTitle>Repository Sync PR Preview</DialogTitle>
+                </DialogHeader>
+                {activeSync.prPreview ? (
+                  <div className="max-h-[75vh] space-y-4 overflow-y-auto pr-2">
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <MiniStat label="Branch" value={activeSync.prPreview.branchName} />
+                        <MiniStat label="PR Title" value={activeSync.prPreview.title} />
+                        <MiniStat label="Risk" value={activeSync.prPreview.riskLevel} />
+                        <MiniStat label="Confidence" value={`${activeSync.prPreview.confidenceScore}%`} />
+                      </div>
+                      <pre className="mt-4 max-h-44 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{activeSync.prPreview.description}</pre>
+                    </div>
+                    {(activeSync.generatedUpdates ?? []).map((update) => (
+                      <div key={update.id} className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="font-mono text-sm font-semibold">{update.testFilePath}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{update.impactReason}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{update.changedLocatorOrFlow}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline" className={riskClass(update.riskLevel)}>{update.riskLevel}</Badge>
+                            <Badge variant="outline">{update.confidenceScore}%</Badge>
+                            <Badge variant="outline">{update.suggestedAction}</Badge>
+                          </div>
+                        </div>
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          <div>
+                            <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Old code</p>
+                            <pre className="max-h-72 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{update.oldCode || "New file"}</pre>
+                          </div>
+                          <div>
+                            <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">New AI-suggested code</p>
+                            <pre className="max-h-72 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{update.newCode}</pre>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setIsPreviewOpen(false)}>Close</Button>
+                      <Button onClick={createSyncPr} disabled={isCreatingSyncPr}>
+                        {isCreatingSyncPr ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
+                        Confirm and Create PR
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border/50 p-8 text-center text-sm text-muted-foreground">
+                    Generate Playwright updates before viewing PR preview.
+                  </p>
+                )}
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </Card>
@@ -6221,10 +6351,7 @@ function TestExecutionPage({
   onDeleteRun: (runId: string) => void;
   onUpdateExecution: (
     execution: TestExecution,
-    status: TestExecutionStatus,
-    actualResult: string,
-    comments: string,
-    bugId: string,
+    draft: ExecutionEvidenceDraft,
   ) => Promise<void>;
   onLoadExecutionHistory: (executionId: string) => void;
   onExportRun: (runId: string, format: ExportFormat) => void;
@@ -6248,7 +6375,7 @@ function TestExecutionPage({
     endDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10),
     description: "",
   });
-  const [executionDrafts, setExecutionDrafts] = useState<Record<string, { status: TestExecutionStatus; actualResult: string; comments: string; bugId: string }>>({});
+  const [executionDrafts, setExecutionDrafts] = useState<Record<string, ExecutionEvidenceDraft>>({});
 
   const createRun = async () => {
     const trimmedName = form.name.trim();
@@ -6298,12 +6425,39 @@ function TestExecutionPage({
       actualResult: execution.actualResult,
       comments: execution.comments,
       bugId: execution.bugId ?? "",
+      jiraBugId: execution.jiraBugId ?? execution.bugId ?? "",
+      jiraBugUrl: execution.jiraBugUrl ?? "",
+      screenshotUrl: execution.screenshotUrl ?? "",
+      videoUrl: execution.videoUrl ?? "",
+      logUrl: execution.logUrl ?? "",
+      executionTime: execution.executionTime ? String(execution.executionTime) : "",
+      browser: execution.browser ?? "",
+      operatingSystem: execution.operatingSystem ?? "",
+      buildNumber: execution.buildNumber ?? detail?.buildVersion ?? "",
+      environment: execution.environment ?? detail?.environment ?? "",
     };
 
-  const setDraft = (executionId: string, patch: Partial<{ status: TestExecutionStatus; actualResult: string; comments: string; bugId: string }>) => {
+  const setDraft = (executionId: string, patch: Partial<ExecutionEvidenceDraft>) => {
     setExecutionDrafts((current) => ({
       ...current,
-      [executionId]: { status: "Not Executed", actualResult: "", comments: "", bugId: "", ...current[executionId], ...patch },
+      [executionId]: {
+        status: "Not Executed",
+        actualResult: "",
+        comments: "",
+        bugId: "",
+        jiraBugId: "",
+        jiraBugUrl: "",
+        screenshotUrl: "",
+        videoUrl: "",
+        logUrl: "",
+        executionTime: "",
+        browser: "",
+        operatingSystem: "",
+        buildNumber: detail?.buildVersion ?? "",
+        environment: detail?.environment ?? "",
+        ...current[executionId],
+        ...patch,
+      },
     }));
   };
 
@@ -6524,11 +6678,80 @@ function TestExecutionPage({
                             />
                             <Button
                               className="col-span-12 md:col-span-6 2xl:col-span-2"
-                              onClick={() => onUpdateExecution(execution, draft.status, draft.actualResult, draft.comments, draft.bugId)}
+                              onClick={() => onUpdateExecution(execution, draft)}
                             >
                               Update
                             </Button>
                           </div>
+                          <details className="mt-4 rounded-lg border border-border/40 bg-background/60 p-4">
+                            <summary className="cursor-pointer text-sm font-semibold">Execution Evidence</summary>
+                            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                              <Input
+                                placeholder="Screenshot URL"
+                                value={draft.screenshotUrl}
+                                onChange={(event) => setDraft(execution.id, { screenshotUrl: event.target.value })}
+                              />
+                              <Input
+                                placeholder="Video URL"
+                                value={draft.videoUrl}
+                                onChange={(event) => setDraft(execution.id, { videoUrl: event.target.value })}
+                              />
+                              <Input
+                                placeholder="Log file URL"
+                                value={draft.logUrl}
+                                onChange={(event) => setDraft(execution.id, { logUrl: event.target.value })}
+                              />
+                              <Input
+                                placeholder="Jira Bug ID"
+                                value={draft.jiraBugId}
+                                onChange={(event) => setDraft(execution.id, { jiraBugId: event.target.value, bugId: event.target.value })}
+                              />
+                              <Input
+                                placeholder="Jira Bug URL"
+                                value={draft.jiraBugUrl}
+                                onChange={(event) => setDraft(execution.id, { jiraBugUrl: event.target.value })}
+                              />
+                              <Input
+                                type="number"
+                                min="0"
+                                placeholder="Execution time in minutes"
+                                value={draft.executionTime}
+                                onChange={(event) => setDraft(execution.id, { executionTime: event.target.value })}
+                              />
+                              <Select value={draft.browser || "none"} onValueChange={(browser) => setDraft(execution.id, { browser: browser === "none" ? "" : browser as ExecutionEvidenceDraft["browser"] })}>
+                                <SelectTrigger><SelectValue placeholder="Browser" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Browser not set</SelectItem>
+                                  {["Chrome", "Firefox", "Safari", "Edge"].map((browser) => <SelectItem key={browser} value={browser}>{browser}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                              <Select value={draft.operatingSystem || "none"} onValueChange={(operatingSystem) => setDraft(execution.id, { operatingSystem: operatingSystem === "none" ? "" : operatingSystem as ExecutionEvidenceDraft["operatingSystem"] })}>
+                                <SelectTrigger><SelectValue placeholder="Operating System" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">OS not set</SelectItem>
+                                  {["Windows", "macOS", "Linux", "Android", "iOS"].map((operatingSystem) => <SelectItem key={operatingSystem} value={operatingSystem}>{operatingSystem}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                placeholder="Build number"
+                                value={draft.buildNumber}
+                                onChange={(event) => setDraft(execution.id, { buildNumber: event.target.value })}
+                              />
+                              <Select value={draft.environment || "QA"} onValueChange={(environment) => setDraft(execution.id, { environment: environment as ExecutionEvidenceDraft["environment"] })}>
+                                <SelectTrigger><SelectValue placeholder="Environment" /></SelectTrigger>
+                                <SelectContent>{["QA", "UAT", "Staging", "Production"].map((environment) => <SelectItem key={environment} value={environment}>{environment}</SelectItem>)}</SelectContent>
+                              </Select>
+                            </div>
+                            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                              Failed tests require actual result, comments, and screenshot/log/Jira evidence. Blocked tests require comments or blocker reason.
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                              {execution.screenshotUrl && <a className="text-primary underline" href={execution.screenshotUrl} target="_blank" rel="noreferrer">Screenshot</a>}
+                              {execution.videoUrl && <a className="text-primary underline" href={execution.videoUrl} target="_blank" rel="noreferrer">Video</a>}
+                              {execution.logUrl && <a className="text-primary underline" href={execution.logUrl} target="_blank" rel="noreferrer">Log</a>}
+                              {execution.jiraBugUrl && <a className="text-primary underline" href={execution.jiraBugUrl} target="_blank" rel="noreferrer">Jira Bug</a>}
+                            </div>
+                          </details>
                           <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
                             <span>Executed by {execution.executedBy ?? "-"}</span>
                             <span>{execution.executedAt ? formatDate(execution.executedAt) : "Not executed"}</span>
@@ -6556,6 +6779,9 @@ function TestExecutionPage({
               ["Pass Rate", `${dashboard?.passRate ?? 0}%`],
               ["Failed", dashboard?.failedTestCases ?? 0],
               ["Blocked", dashboard?.blockedTestCases ?? 0],
+              ["Failed w/ Evidence", dashboard?.failedTestsWithEvidence ?? 0],
+              ["Linked Bugs", dashboard?.testsLinkedToBugs ?? 0],
+              ["Avg Exec Time", `${dashboard?.averageExecutionTime ?? 0}m`],
             ].map(([label, value]) => (
               <Card key={label} className="app-card p-4">
                 <p className="text-xs text-muted-foreground">{label}</p>
@@ -6603,6 +6829,39 @@ function TestExecutionPage({
               ))}
             </div>
           </Card>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <Card className="app-card p-5">
+              <h3 className="font-semibold">Browser-wise Failures</h3>
+              <div className="mt-4 space-y-2">
+                {(dashboard?.browserWiseFailures ?? []).length ? dashboard?.browserWiseFailures?.map((item) => (
+                  <div key={item.browser} className="flex items-center justify-between rounded-lg border border-border/40 bg-surface/40 px-3 py-2 text-sm">
+                    <span>{item.browser}</span><Badge variant="outline">{item.failures}</Badge>
+                  </div>
+                )) : <p className="text-sm text-muted-foreground">No browser failure data yet.</p>}
+              </div>
+            </Card>
+            <Card className="app-card p-5">
+              <h3 className="font-semibold">OS-wise Failures</h3>
+              <div className="mt-4 space-y-2">
+                {(dashboard?.osWiseFailures ?? []).length ? dashboard?.osWiseFailures?.map((item) => (
+                  <div key={item.operatingSystem} className="flex items-center justify-between rounded-lg border border-border/40 bg-surface/40 px-3 py-2 text-sm">
+                    <span>{item.operatingSystem}</span><Badge variant="outline">{item.failures}</Badge>
+                  </div>
+                )) : <p className="text-sm text-muted-foreground">No OS failure data yet.</p>}
+              </div>
+            </Card>
+            <Card className="app-card p-5">
+              <h3 className="font-semibold">Build-wise Pass Rate</h3>
+              <div className="mt-4 space-y-2">
+                {(dashboard?.buildWisePassRate ?? []).length ? dashboard?.buildWisePassRate?.map((item) => (
+                  <div key={item.buildNumber} className="rounded-lg border border-border/40 bg-surface/40 p-3 text-sm">
+                    <div className="mb-2 flex items-center justify-between"><span>{item.buildNumber}</span><span>{item.passRate}%</span></div>
+                    <Progress value={item.passRate} className="h-2" />
+                  </div>
+                )) : <p className="text-sm text-muted-foreground">No build pass-rate data yet.</p>}
+              </div>
+            </Card>
+          </div>
         </TabsContent>
         <TabsContent value="history">
           <Card className="app-card p-5">
