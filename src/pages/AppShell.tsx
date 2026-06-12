@@ -32,6 +32,7 @@ import {
   History,
   Download,
   Search,
+  SearchCheck,
   Github,
   GitBranch,
   GitMerge,
@@ -47,6 +48,7 @@ import {
   Layers3,
   TrendingUp,
   UserCircle,
+  Puzzle,
 } from "lucide-react";
 import {
   Area,
@@ -4333,13 +4335,37 @@ function LandingPage({
     { icon: Users, label: "Team Collaboration" },
     { icon: GitBranch, label: "Enterprise Integrations" },
   ];
-  const painPoints = [
-    "Manual test case creation",
-    "Poor coverage visibility",
-    "Requirement changes",
-    "Scattered QA assets",
-    "Review delays",
-    "Lack of execution visibility",
+  const challengeCards = [
+    {
+      title: "Manual Test Design",
+      description: "Writing and maintaining test cases consumes significant QA effort across every sprint.",
+      icon: FileText,
+    },
+    {
+      title: "Requirement Changes",
+      description: "Frequent requirement updates quickly make existing test cases outdated or incomplete.",
+      icon: RefreshCw,
+    },
+    {
+      title: "Limited Test Coverage",
+      description: "Teams struggle to understand what has been tested, what is missing, and where quality risks exist.",
+      icon: SearchCheck,
+    },
+    {
+      title: "Review Bottlenecks",
+      description: "Manual review and approval processes slow down QA readiness and delay releases.",
+      icon: GitPullRequest,
+    },
+    {
+      title: "Disconnected QA Tools",
+      description: "Requirements, test cases, execution results, automation, and reports are often spread across multiple tools.",
+      icon: Puzzle,
+    },
+    {
+      title: "Automation Maintenance",
+      description: "Existing Playwright automation requires constant updates as applications and repositories change.",
+      icon: Code2,
+    },
   ];
   const features = [
     {
@@ -4645,15 +4671,21 @@ function LandingPage({
       </section>
 
       <LandingSection
-        eyebrow="The Problem"
-        title="QA Teams Need More Than Faster Documentation"
-        description="Enterprise QA teams are expected to move quickly while managing changing requirements, distributed teams, approval gates, and release risk."
+        eyebrow="The Challenge"
+        title="Quality Engineering Has Become More Complex Than Ever"
+        description="Modern software teams struggle with disconnected QA workflows, evolving requirements, automation maintenance, limited coverage visibility, and increasing release pressure."
       >
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-          {painPoints.map((point) => (
-            <div key={point} className="rounded-lg border border-border/40 bg-card/60 p-4">
-              <AlertTriangle className="mb-3 size-4 text-warning" />
-              <p className="text-sm font-medium">{point}</p>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {challengeCards.map(({ title, description, icon: Icon }) => (
+            <div
+              key={title}
+              className="group flex min-h-[180px] flex-col rounded-xl border border-border/50 bg-card/70 p-5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-primary/30 hover:bg-card hover:shadow-lg"
+            >
+              <span className="mb-5 flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                <Icon className="size-5" />
+              </span>
+              <h3 className="text-base font-semibold leading-6 text-foreground">{title}</h3>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">{description}</p>
             </div>
           ))}
         </div>
