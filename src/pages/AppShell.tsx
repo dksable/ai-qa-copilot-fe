@@ -124,6 +124,8 @@ import {
   type AIProviderFeatureName,
   type AIProviderSettingsResponse,
   type AIProviderUsageLog,
+  type ApplicationRepositoryConfig,
+  type ApplicationRepositoryType,
   type SaveAIProviderInput,
   type AuthContextResponse,
   type AuthResponse,
@@ -143,6 +145,12 @@ import {
   type ProjectSummary,
   type Requirement,
   type RepositoryAnalysis,
+  type RepositoryActivity,
+  type RepositoryActivityStatus,
+  type RepositoryImpactAnalysis,
+  type RepositoryImpactAnalysisStatus,
+  type RepositoryGeneratedTestUpdate,
+  type RepositoryValidationRun,
   type RepositorySync,
   type ReviewDetail,
   type Workspace,
@@ -151,6 +159,7 @@ import {
   type WorkspaceRole,
   type Plan,
   type PlanId,
+  type PlaywrightValidationJob,
   type SubscriptionResponse,
   type ApprovedTestCaseVersion,
   type CreateTestRunInput,
@@ -213,6 +222,8 @@ export default function AppShell() {
   );
   const [plan, setPlan] = useState<TestPlan | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [playwrightValidationJob, setPlaywrightValidationJob] = useState<PlaywrightValidationJob | null>(null);
+  const [isValidatingPlaywright, setIsValidatingPlaywright] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("landing");
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
@@ -267,6 +278,8 @@ export default function AppShell() {
   const [githubAutomationConfig, setGithubAutomationConfig] = useState<GitHubAutomationConfig | null>(null);
   const [repositoryAnalysis, setRepositoryAnalysis] = useState<RepositoryAnalysis | null>(null);
   const [repositorySyncs, setRepositorySyncs] = useState<RepositorySync[]>([]);
+  const [applicationRepositories, setApplicationRepositories] = useState<ApplicationRepositoryConfig[]>([]);
+  const [repositoryActivities, setRepositoryActivities] = useState<RepositoryActivity[]>([]);
   const [isIntegrationLoading, setIsIntegrationLoading] = useState(false);
   const [isPushingPlaywright, setIsPushingPlaywright] = useState(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
@@ -394,18 +407,24 @@ export default function AppShell() {
     if (!workspaceId) return;
     try {
       setIsIntegrationLoading(true);
-      const [config, analysis] = await Promise.all([
+      const [config, analysis, applicationRepos, activities] = await Promise.all([
         projectApi.getGitHubAutomationConfig(workspaceId),
         projectApi.getGitHubRepositoryAnalysis(workspaceId),
+        projectApi.listApplicationRepositories(workspaceId),
+        projectApi.listRepositoryActivity(workspaceId),
       ]);
       const syncs = config ? await projectApi.listGitHubRepositorySyncs(workspaceId) : [];
       setGithubAutomationConfig(config);
       setRepositoryAnalysis(analysis);
       setRepositorySyncs(syncs);
+      setApplicationRepositories(applicationRepos);
+      setRepositoryActivities(activities);
     } catch {
       setGithubAutomationConfig(null);
       setRepositoryAnalysis(null);
       setRepositorySyncs([]);
+      setApplicationRepositories([]);
+      setRepositoryActivities([]);
     } finally {
       setIsIntegrationLoading(false);
     }
@@ -495,6 +514,50 @@ export default function AppShell() {
       toast.error(error instanceof Error ? error.message : "Failed to push Playwright test to GitHub");
     } finally {
       setIsPushingPlaywright(false);
+    }
+  };
+
+  const runPlaywrightValidation = async (fileName: string) => {
+    if (!plan?.playwright) {
+      toast.error("Generate Playwright code before running validation.");
+      return;
+    }
+    const workspaceId = selectedWorkspaceId || auth?.workspace?.id;
+    const moduleItem = (projectDetail?.modules ?? []).find((item) => item.id === selectedModuleId);
+    const requirementItem = (moduleItem?.requirements ?? []).find((item) => item.id === selectedRequirementId);
+
+    try {
+      setIsValidatingPlaywright(true);
+      const queuedJob = await projectApi.createPlaywrightValidationJob({
+        workspaceId,
+        projectId: selectedProjectId || undefined,
+        moduleId: selectedModuleId || undefined,
+        requirementId: selectedRequirementId || undefined,
+        requirementTitle: requirementItem?.title || requirement.slice(0, 120) || "Generated Playwright Tests",
+        fileName,
+        playwrightCode: plan.playwright,
+      });
+      setPlaywrightValidationJob(queuedJob);
+
+      let latestJob = queuedJob;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        latestJob = await projectApi.getPlaywrightValidationJob(queuedJob.id);
+        setPlaywrightValidationJob(latestJob);
+        if (["Passed", "Failed", "Warning", "Error"].includes(latestJob.status)) break;
+      }
+
+      if (latestJob.status === "Passed") {
+        toast.success("AI Test Validation passed");
+      } else if (latestJob.status === "Warning") {
+        toast.warning("AI Test Validation completed with warnings");
+      } else if (latestJob.status === "Failed" || latestJob.status === "Error") {
+        toast.error(latestJob.errorMessage || "AI Test Validation found issues to review");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "AI Test Validation failed");
+    } finally {
+      setIsValidatingPlaywright(false);
     }
   };
 
@@ -607,6 +670,7 @@ export default function AppShell() {
     }
     try {
       setIsGenerating(true);
+      setPlaywrightValidationJob(null);
       const generatedPlan = await generateTestCases({
         requirement,
         testType,
@@ -728,6 +792,8 @@ export default function AppShell() {
             githubAutomationConfig={githubAutomationConfig}
             repositoryAnalysis={repositoryAnalysis}
             repositorySyncs={repositorySyncs}
+            applicationRepositories={applicationRepositories}
+            repositoryActivities={repositoryActivities}
             isIntegrationLoading={isIntegrationLoading}
             onAuthChange={setAuth}
             onRefreshAIProviders={() => refreshAIProviders(selectedWorkspaceId || auth?.workspace?.id || "")}
@@ -807,6 +873,9 @@ export default function AppShell() {
                   repositoryAnalysis={repositoryAnalysis}
                   isPushingPlaywright={isPushingPlaywright}
                   onPushPlaywright={pushPlaywrightToGitHub}
+                  validationJob={playwrightValidationJob}
+                  isValidatingPlaywright={isValidatingPlaywright}
+                  onValidatePlaywright={runPlaywrightValidation}
                 />
               )}
               {!isGenerating && !plan && <EmptyState />}
@@ -1367,7 +1436,7 @@ function GeneratorCard({
     projectDetail?.requirements.filter((item) => item.moduleId === selectedModuleId) ?? [];
 
   return (
-    <Card className="border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
+    <Card className="max-w-full overflow-hidden border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Wand2 className="size-4 text-primary" />
@@ -1500,9 +1569,9 @@ function DashboardHomePage({
   const activeRuns = testRuns.filter((run) => run.status !== "Completed").slice(0, 4);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <div className="max-w-full overflow-hidden space-y-6">
+      <div className="flex max-w-full flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
             <LayoutDashboard className="mr-1 size-3" /> Dashboard
           </Badge>
@@ -1511,7 +1580,7 @@ function DashboardHomePage({
             Monitor QA coverage, projects, reviews, execution progress, and workspace usage from one place.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex max-w-full flex-wrap gap-2">
           <Button variant="outline" onClick={() => onNavigate("projects")}>
             <FolderKanban className="size-4" />
             Projects
@@ -2136,7 +2205,7 @@ function ProjectDetailPanel({
 
   return (
     <div className="space-y-4">
-      <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+      <Card className="max-w-full overflow-hidden border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -2800,8 +2869,8 @@ function TestCaseHistoryPage({
         </div>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+      <div className="grid max-w-full gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <Card className="min-w-0 max-w-full overflow-hidden border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ClipboardCheck className="size-4 text-primary" />
@@ -2832,8 +2901,8 @@ function TestCaseHistoryPage({
                   )}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-3">
                         <input
                           type="checkbox"
                           checked={selectedExportIds.includes(item.id)}
@@ -2841,11 +2910,11 @@ function TestCaseHistoryPage({
                           aria-label={`Select version ${item.version} for export`}
                           className="size-4 accent-primary"
                         />
-                        <button type="button" onClick={() => onSelectHistory(item.id)} className="text-left">
-                          <p className="font-semibold">{item.requirementTitle}</p>
+                        <button type="button" onClick={() => onSelectHistory(item.id)} className="min-w-0 text-left">
+                          <p className="break-words font-semibold">{item.requirementTitle}</p>
                         </button>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
                         {item.projectName} / {item.moduleName}
                       </p>
                     </div>
@@ -2865,19 +2934,19 @@ function TestCaseHistoryPage({
           )}
         </Card>
 
-        <div className="space-y-5">
+        <div className="min-w-0 max-w-full space-y-5 overflow-hidden">
           {selectedHistory ? (
             <>
-              <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold">{selectedHistory.requirementTitle}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
+              <Card className="max-w-full overflow-hidden border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+                <div className="flex max-w-full flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="break-words text-xl font-semibold">{selectedHistory.requirementTitle}</h2>
+                    <p className="mt-1 break-words text-sm text-muted-foreground">
                       Version {selectedHistory.version} generated on {formatDate(selectedHistory.generatedAt)} by {selectedHistory.generatedBy}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">AI model: {selectedHistory.aiModelUsed}</p>
+                    <p className="mt-1 break-words text-xs text-muted-foreground">AI model: {selectedHistory.aiModelUsed}</p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                     <Select
                       value={selectedHistory.reviewStatus}
                       onValueChange={(status) => onStatusChange(selectedHistory.id, status as HistoryStatus)}
@@ -2925,11 +2994,11 @@ function TestCaseHistoryPage({
                     </Button>
                   </div>
                 </div>
-                <div className="mt-5 rounded-lg border border-border/40 bg-surface/40 p-4">
+                <div className="mt-5 max-w-full overflow-hidden rounded-lg border border-border/40 bg-surface/40 p-4">
                   <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Requirement Input
                   </p>
-                  <p className="whitespace-pre-wrap text-sm">{selectedHistory.requirementInput}</p>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-6">{selectedHistory.requirementInput}</p>
                 </div>
                 <div className="mt-4">
                   <div className="mb-2 flex items-center justify-between text-sm">
@@ -2940,7 +3009,7 @@ function TestCaseHistoryPage({
                 </div>
               </Card>
 
-              <Card className="border-border/50 bg-card/70 p-5 backdrop-blur">
+              <Card className="max-w-full overflow-hidden border-border/50 bg-card/70 p-5 backdrop-blur">
                 <div className="mb-4 flex items-center gap-2">
                   <History className="size-4 text-primary" />
                   <h3 className="font-semibold">Version Timeline</h3>
@@ -2969,7 +3038,9 @@ function TestCaseHistoryPage({
                 onCompare={onCompare}
               />
 
-              <Results plan={selectedHistory.output} />
+              <div className="min-w-0 max-w-full overflow-hidden">
+                <Results plan={selectedHistory.output} />
+              </div>
             </>
           ) : (
             <Card className="border-dashed border-border/50 bg-card/30 p-10 text-center backdrop-blur">
@@ -3295,6 +3366,8 @@ function ProfilePage({
   githubAutomationConfig,
   repositoryAnalysis,
   repositorySyncs,
+  applicationRepositories,
+  repositoryActivities,
   isIntegrationLoading,
   onAuthChange,
   onRefreshAIProviders,
@@ -3308,6 +3381,8 @@ function ProfilePage({
   githubAutomationConfig: GitHubAutomationConfig | null;
   repositoryAnalysis: RepositoryAnalysis | null;
   repositorySyncs: RepositorySync[];
+  applicationRepositories: ApplicationRepositoryConfig[];
+  repositoryActivities: RepositoryActivity[];
   isIntegrationLoading: boolean;
   onAuthChange: (auth: AuthContextResponse | null) => void;
   onRefreshAIProviders: () => void;
@@ -3371,6 +3446,8 @@ function ProfilePage({
             config={githubAutomationConfig}
             analysis={repositoryAnalysis}
             syncs={repositorySyncs}
+            applicationRepositories={applicationRepositories}
+            repositoryActivities={repositoryActivities}
             isLoading={isIntegrationLoading}
             onRefresh={onRefreshIntegrations}
           />
@@ -3424,6 +3501,10 @@ const aiFeatureLabels: Record<AIProviderFeatureName, string> = {
   "playwright-generation": "Playwright Generation",
   "requirement-impact": "Requirement Impact Analysis",
   "coverage-score": "Coverage Score",
+  "repository-impact": "Repository Impact Analysis",
+  "repository-test-update": "Repository Test Update Generation",
+  "playwright-validation-failure": "Playwright Validation Failure Analysis",
+  "repository-fix-suggestion": "Repository Fix Suggestion",
 };
 
 function AutomationRepositorySettings({
@@ -3432,6 +3513,8 @@ function AutomationRepositorySettings({
   config,
   analysis,
   syncs,
+  applicationRepositories,
+  repositoryActivities,
   isLoading,
   onRefresh,
 }: {
@@ -3440,6 +3523,8 @@ function AutomationRepositorySettings({
   config: GitHubAutomationConfig | null;
   analysis: RepositoryAnalysis | null;
   syncs: RepositorySync[];
+  applicationRepositories: ApplicationRepositoryConfig[];
+  repositoryActivities: RepositoryActivity[];
   isLoading: boolean;
   onRefresh: () => void;
 }) {
@@ -3649,7 +3734,13 @@ function AutomationRepositorySettings({
         : "border-success/40 bg-success/10 text-success";
 
   return (
-    <div className="space-y-5">
+    <Tabs defaultValue="automation" className="space-y-5">
+      <TabsList className="h-auto flex-wrap justify-start">
+        <TabsTrigger value="automation">Automation Repository</TabsTrigger>
+        <TabsTrigger value="application">Application Repositories</TabsTrigger>
+        <TabsTrigger value="activity">Webhook Activity</TabsTrigger>
+      </TabsList>
+      <TabsContent value="automation" className="space-y-5">
       <Card className="app-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -4051,6 +4142,712 @@ function AutomationRepositorySettings({
           </div>
         )}
       </Card>
+      </TabsContent>
+      <TabsContent value="application">
+        <ApplicationRepositoriesPanel
+          workspaceId={workspaceId}
+          canManage={canManage}
+          repositories={applicationRepositories}
+          isLoading={isLoading}
+          onRefresh={onRefresh}
+        />
+      </TabsContent>
+      <TabsContent value="activity">
+        <RepositoryActivityPanel
+          activities={repositoryActivities}
+          repositories={applicationRepositories}
+          onRefresh={onRefresh}
+        />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function ApplicationRepositoriesPanel({
+  workspaceId,
+  canManage,
+  repositories,
+  isLoading,
+  onRefresh,
+}: {
+  workspaceId: string;
+  canManage: boolean;
+  repositories: ApplicationRepositoryConfig[];
+  isLoading: boolean;
+  onRefresh: () => void;
+}) {
+  const [form, setForm] = useState({
+    repositoryType: "frontend" as ApplicationRepositoryType,
+    token: "",
+    owner: "",
+    repo: "",
+    defaultBranch: "main",
+    webhookSecret: "",
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [manualSetup, setManualSetup] = useState<ApplicationRepositoryConfig["manualSetup"] | null>(null);
+
+  const connectRepository = async () => {
+    if (!workspaceId) {
+      toast.error("Select a workspace first.");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const saved = await projectApi.connectApplicationRepository({
+        workspaceId,
+        ...form,
+        webhookSecret: form.webhookSecret || undefined,
+      });
+      setManualSetup(saved.manualSetup ?? null);
+      setForm((current) => ({ ...current, token: "", webhookSecret: "" }));
+      toast.success(saved.webhookStatus === "Connected" ? "Application repository connected" : "Repository saved. Manual webhook setup may be required.");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to connect application repository");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const testConnection = async (configId: string) => {
+    try {
+      const result = await projectApi.testApplicationRepositoryConnection(configId);
+      toast.success(`Connected to ${result.repository}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "GitHub connection failed");
+    }
+  };
+
+  const registerWebhook = async (configId: string) => {
+    try {
+      const updated = await projectApi.registerApplicationRepositoryWebhook(configId);
+      setManualSetup(updated.manualSetup ?? null);
+      toast.success(updated.webhookStatus === "Connected" ? "Webhook registered" : "Manual webhook setup required");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Webhook registration failed");
+      onRefresh();
+    }
+  };
+
+  const disconnectRepository = async (configId: string) => {
+    if (!window.confirm("Disconnect this application repository?")) return;
+    try {
+      await projectApi.deleteApplicationRepository(configId);
+      toast.success("Application repository disconnected");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect repository");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <Card className="app-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">Application Repositories</Badge>
+            <h2 className="font-display text-2xl font-semibold">Connect Frontend and Backend Repositories</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Register GitHub webhooks for application repositories so AI QA Copilot can capture push and pull request changes for future impact analysis.
+            </p>
+          </div>
+          <Badge variant="outline">{repositories.length} connected</Badge>
+        </div>
+
+        <div className="mt-6 grid gap-3 lg:grid-cols-3">
+          <Select value={form.repositoryType} onValueChange={(repositoryType) => setForm((value) => ({ ...value, repositoryType: repositoryType as ApplicationRepositoryType }))}>
+            <SelectTrigger><SelectValue placeholder="Repository Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="frontend">Application Frontend Repository</SelectItem>
+              <SelectItem value="backend">Application Backend Repository</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input value={form.owner} disabled={!canManage} onChange={(event) => setForm((value) => ({ ...value, owner: event.target.value }))} placeholder="Repository owner" />
+          <Input value={form.repo} disabled={!canManage} onChange={(event) => setForm((value) => ({ ...value, repo: event.target.value }))} placeholder="Repository name" />
+          <Input value={form.defaultBranch} disabled={!canManage} onChange={(event) => setForm((value) => ({ ...value, defaultBranch: event.target.value }))} placeholder="Default branch" />
+          <Input type="password" value={form.token} disabled={!canManage} onChange={(event) => setForm((value) => ({ ...value, token: event.target.value }))} placeholder="GitHub Personal Access Token" />
+          <Input type="password" value={form.webhookSecret} disabled={!canManage} onChange={(event) => setForm((value) => ({ ...value, webhookSecret: event.target.value }))} placeholder="Webhook secret optional" />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button onClick={connectRepository} disabled={!canManage || isSaving || !form.token || !form.owner || !form.repo}>
+            {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />}
+            Save & Register Webhook
+          </Button>
+        </div>
+        {manualSetup && (
+          <div className="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm">
+            <p className="font-semibold text-warning">Manual webhook setup required</p>
+            <div className="mt-2 grid gap-2 text-muted-foreground md:grid-cols-2">
+              <p>Webhook URL: <span className="font-mono text-foreground">{manualSetup.webhookUrl}</span></p>
+              <p>Content type: <span className="font-mono text-foreground">{manualSetup.contentType}</span></p>
+              <p>Secret: <span className="font-mono text-foreground">{manualSetup.secret}</span></p>
+              <p>Events: <span className="font-mono text-foreground">{manualSetup.events.join(", ")}</span></p>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {isLoading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : repositories.length === 0 ? (
+        <Card className="border-dashed border-border/50 bg-card/40 p-10 text-center">
+          <GitBranch className="mx-auto size-8 text-muted-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">No application repositories connected yet.</p>
+        </Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {repositories.map((repository) => (
+            <Card key={repository.id} className="app-card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{repository.repositoryType === "frontend" ? "Frontend" : "Backend"}</Badge>
+                    <Badge variant="outline" className={
+                      repository.webhookStatus === "Connected"
+                        ? "border-success/40 bg-success/10 text-success"
+                        : repository.webhookStatus === "Failed"
+                          ? "border-destructive/40 bg-destructive/10 text-destructive"
+                          : "border-warning/40 bg-warning/10 text-warning"
+                    }>
+                      {repository.webhookStatus}
+                    </Badge>
+                  </div>
+                  <h3 className="mt-3 font-semibold">{repository.owner}/{repository.repo}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">Branch: {repository.defaultBranch}</p>
+                </div>
+                <Github className="size-5 text-muted-foreground" />
+              </div>
+              <div className="mt-4 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                <p>Last event: {repository.lastEventReceivedAt ? formatDate(repository.lastEventReceivedAt) : "-"}</p>
+                <p>Last sync: {repository.lastSyncedAt ? formatDate(repository.lastSyncedAt) : "-"}</p>
+                <p>Token: {repository.tokenMasked}</p>
+                <p>Secret: {repository.webhookSecretMasked}</p>
+              </div>
+              {repository.webhookError && <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">{repository.webhookError}</p>}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => testConnection(repository.id)}>Test Connection</Button>
+                <Button variant="outline" size="sm" onClick={() => registerWebhook(repository.id)}>Re-register Webhook</Button>
+                <Button variant="outline" size="sm" disabled={!canManage} onClick={() => disconnectRepository(repository.id)}>Disconnect</Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepositoryActivityPanel({
+  activities,
+  repositories,
+  onRefresh,
+}: {
+  activities: RepositoryActivity[];
+  repositories: ApplicationRepositoryConfig[];
+  onRefresh: () => void;
+}) {
+  const [activeActivity, setActiveActivity] = useState<RepositoryActivity | null>(null);
+  const [impactAnalysis, setImpactAnalysis] = useState<RepositoryImpactAnalysis | null>(null);
+  const [isImpactLoading, setIsImpactLoading] = useState(false);
+  const [isImpactRunning, setIsImpactRunning] = useState(false);
+  const [testUpdates, setTestUpdates] = useState<RepositoryGeneratedTestUpdate[]>([]);
+  const [validationRun, setValidationRun] = useState<RepositoryValidationRun | null>(null);
+  const [isUpdateGenerating, setIsUpdateGenerating] = useState(false);
+  const [isValidationRunning, setIsValidationRunning] = useState(false);
+  const [isPrCreating, setIsPrCreating] = useState(false);
+  const [fixSuggestion, setFixSuggestion] = useState("");
+  const totalFiles = activities.reduce((sum, activity) => sum + activity.fileCount, 0);
+  const lastActivity = activities[0]?.createdAt;
+
+  useEffect(() => {
+    if (!activeActivity) {
+      setImpactAnalysis(null);
+      return;
+    }
+    setIsImpactLoading(true);
+    projectApi
+      .getRepositoryImpactAnalysis(activeActivity.id)
+      .then(async (analysis) => {
+        setImpactAnalysis(analysis);
+        const [updates, validation] = await Promise.all([
+          projectApi.listRepositoryTestUpdates(analysis.id).catch(() => []),
+          projectApi.getRepositoryUpdateValidation(analysis.id).catch(() => null),
+        ]);
+        setTestUpdates(updates);
+        setValidationRun(validation);
+      })
+      .catch(() => {
+        setImpactAnalysis(null);
+        setTestUpdates([]);
+        setValidationRun(null);
+      })
+      .finally(() => setIsImpactLoading(false));
+  }, [activeActivity]);
+
+  const updateStatus = async (activityId: string, status: RepositoryActivityStatus) => {
+    try {
+      await projectApi.updateRepositoryActivityStatus(activityId, status);
+      toast.success(`Activity marked ${status.toLowerCase()}`);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update activity");
+    }
+  };
+
+  const runImpactAnalysis = async (regenerate = false) => {
+    if (!activeActivity) return;
+    try {
+      setIsImpactRunning(true);
+      const analysis = regenerate
+        ? await projectApi.regenerateRepositoryImpactAnalysis(activeActivity.id)
+        : await projectApi.runRepositoryImpactAnalysis(activeActivity.id);
+      setImpactAnalysis(analysis);
+      setTestUpdates([]);
+      setValidationRun(null);
+      toast.success(regenerate ? "Impact analysis regenerated" : "Impact analysis completed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Impact analysis failed");
+    } finally {
+      setIsImpactRunning(false);
+    }
+  };
+
+  const generateTestUpdates = async () => {
+    if (!impactAnalysis) return;
+    try {
+      setIsUpdateGenerating(true);
+      const updates = await projectApi.generateRepositoryTestUpdates(impactAnalysis.id);
+      setTestUpdates(updates);
+      toast.success("Generated Playwright test update proposals");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate test updates");
+    } finally {
+      setIsUpdateGenerating(false);
+    }
+  };
+
+  const refreshTestUpdates = async () => {
+    if (!impactAnalysis) return;
+    setTestUpdates(await projectApi.listRepositoryTestUpdates(impactAnalysis.id));
+  };
+
+  const updateTestUpdateStatus = async (updateId: string, action: "approve" | "reject" | "regenerate") => {
+    try {
+      if (action === "approve") await projectApi.approveRepositoryTestUpdate(updateId);
+      if (action === "reject") await projectApi.rejectRepositoryTestUpdate(updateId);
+      if (action === "regenerate") await projectApi.regenerateRepositoryTestUpdate(updateId);
+      await refreshTestUpdates();
+      toast.success(action === "approve" ? "Update approved" : action === "reject" ? "Update rejected" : "Update regenerated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update proposal");
+    }
+  };
+
+  const editTestUpdate = async (update: RepositoryGeneratedTestUpdate) => {
+    const newCode = window.prompt("Edit proposed code", update.newCode);
+    if (!newCode || newCode === update.newCode) return;
+    try {
+      await projectApi.editRepositoryTestUpdate(update.id, { newCode });
+      await refreshTestUpdates();
+      toast.success("Proposed code updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to edit proposed code");
+    }
+  };
+
+  const runValidation = async () => {
+    if (!impactAnalysis) return;
+    try {
+      setIsValidationRunning(true);
+      const run = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id);
+      setValidationRun(run);
+      toast.success(run.status === "Failed" ? "Validation completed with failures" : "Validation passed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Validation failed");
+    } finally {
+      setIsValidationRunning(false);
+    }
+  };
+
+  const generateFixSuggestion = async () => {
+    if (!impactAnalysis) return;
+    try {
+      const result = await projectApi.generateRepositoryFixSuggestion(impactAnalysis.id);
+      setFixSuggestion(result.suggestion);
+      toast.success("Fix suggestion generated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate fix suggestion");
+    }
+  };
+
+  const createImpactPr = async () => {
+    if (!impactAnalysis) return;
+    if (validationRun?.status === "Failed" && !window.confirm("Validation failed. Create PR anyway for QA review?")) return;
+    try {
+      setIsPrCreating(true);
+      const result = await projectApi.createRepositoryImpactPullRequest(impactAnalysis.id);
+      toast.success(
+        <span>
+          Pull Request created:{" "}
+          <a className="font-semibold underline" href={result.pullRequestUrl || result.pullRequest?.html_url} target="_blank" rel="noreferrer">
+            View PR
+          </a>
+        </span>,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create pull request");
+    } finally {
+      setIsPrCreating(false);
+    }
+  };
+
+  const updateImpactStatus = async (status: RepositoryImpactAnalysisStatus) => {
+    if (!impactAnalysis) return;
+    try {
+      const updated = await projectApi.updateRepositoryImpactAnalysisStatus(impactAnalysis.id, status);
+      setImpactAnalysis(updated);
+      toast.success(`Impact analysis marked ${status.toLowerCase()}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update impact analysis");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-5">
+        <MiniStat label="Total Events" value={String(activities.length)} />
+        <MiniStat label="Push Events" value={String(activities.filter((item) => item.eventType === "push").length)} />
+        <MiniStat label="Pull Requests" value={String(activities.filter((item) => item.eventType === "pull_request").length)} />
+        <MiniStat label="Changed Files" value={String(totalFiles)} />
+        <MiniStat label="Last Activity" value={lastActivity ? formatDate(lastActivity) : "-"} />
+      </div>
+
+      <Card className="app-card overflow-hidden p-0">
+        <div className="border-b border-border/40 p-5">
+          <h2 className="font-display text-xl font-semibold">Repository Activity</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Latest GitHub push and pull request events from connected application repositories.</p>
+        </div>
+        {activities.length === 0 ? (
+          <div className="p-10 text-center">
+            <RefreshCw className="mx-auto size-8 text-muted-foreground" />
+            <p className="mt-3 text-sm text-muted-foreground">No webhook activity received yet.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Time</th>
+                  <th className="px-4 py-3">Repository</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Event</th>
+                  <th className="px-4 py-3">Branch</th>
+                  <th className="px-4 py-3">Commit / PR</th>
+                  <th className="px-4 py-3">Author</th>
+                  <th className="px-4 py-3">Files</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {activities.map((activity) => (
+                  <tr key={activity.id}>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(activity.createdAt)}</td>
+                    <td className="px-4 py-3 font-medium">{activity.repoOwner}/{activity.repoName}</td>
+                    <td className="px-4 py-3 capitalize">{activity.repositoryType}</td>
+                    <td className="px-4 py-3">{activity.eventType}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{activity.branch || "-"}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{activity.pullRequestNumber ? `PR #${activity.pullRequestNumber}` : activity.commitSha?.slice(0, 8) || "-"}</td>
+                    <td className="px-4 py-3">{activity.author || "-"}</td>
+                    <td className="px-4 py-3">{activity.fileCount}</td>
+                    <td className="px-4 py-3"><Badge variant="outline">{activity.status}</Badge></td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setActiveActivity(activity)}>View</Button>
+                        <Button variant="outline" size="sm" onClick={() => updateStatus(activity.id, "Reviewed")}>Review</Button>
+                        <Button variant="outline" size="sm" onClick={() => updateStatus(activity.id, "Ignored")}>Ignore</Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Dialog open={Boolean(activeActivity)} onOpenChange={(open) => !open && setActiveActivity(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Repository Activity Detail</DialogTitle>
+          </DialogHeader>
+          {activeActivity && (
+            <Tabs defaultValue="summary" className="max-h-[75vh] overflow-y-auto pr-2">
+              <TabsList className="mb-4">
+                <TabsTrigger value="summary">Event Summary</TabsTrigger>
+                <TabsTrigger value="impact">Impact Analysis</TabsTrigger>
+              </TabsList>
+              <TabsContent value="summary" className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <MiniStat label="Repository" value={`${activeActivity.repoOwner}/${activeActivity.repoName}`} />
+                  <MiniStat label="Event" value={activeActivity.eventType} />
+                  <MiniStat label="Branch" value={activeActivity.branch || "-"} />
+                  <MiniStat label="Author" value={activeActivity.author || "-"} />
+                  <MiniStat label="Files Changed" value={String(activeActivity.fileCount)} />
+                  <MiniStat label="Status" value={activeActivity.status} />
+                </div>
+                {activeActivity.message && <p className="rounded-lg border border-border/40 bg-surface/40 p-3 text-sm">{activeActivity.message}</p>}
+                {activeActivity.pullRequestUrl && (
+                  <a className="text-sm font-semibold text-primary underline" href={activeActivity.pullRequestUrl} target="_blank" rel="noreferrer">Open Pull Request</a>
+                )}
+                <ChangedFilesTable files={activeActivity.changedFiles} />
+                <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">
+                  {JSON.stringify(activeActivity.rawMetadata ?? {}, null, 2)}
+                </pre>
+              </TabsContent>
+              <TabsContent value="impact" className="space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">AI Impact Analysis</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Map application changes to impacted modules, Playwright tests, and QA recommendations.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => runImpactAnalysis(false)} disabled={isImpactRunning}>
+                      {isImpactRunning ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                      Run AI Impact Analysis
+                    </Button>
+                    <Button variant="outline" onClick={() => runImpactAnalysis(true)} disabled={!impactAnalysis || isImpactRunning}>
+                      <RefreshCw className="size-4" />
+                      Regenerate Analysis
+                    </Button>
+                    <Button variant="outline" disabled={!impactAnalysis} onClick={() => updateImpactStatus("Reviewed")}>
+                      <CheckCircle2 className="size-4" />
+                      Mark as Reviewed
+                    </Button>
+                  </div>
+                </div>
+
+                {isImpactLoading ? (
+                  <Skeleton className="h-48 w-full" />
+                ) : !impactAnalysis ? (
+                  <div className="rounded-lg border border-dashed border-border/50 p-8 text-center">
+                    <SearchCheck className="mx-auto size-8 text-muted-foreground" />
+                    <p className="mt-3 text-sm text-muted-foreground">No impact analysis yet. Run analysis to generate test mapping and smart suggestions.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                      <MiniStat label="Changed Files" value={String(impactAnalysis.changedFiles.length)} />
+                      <MiniStat label="Impacted Modules" value={String(impactAnalysis.impactedModules.length)} />
+                      <MiniStat label="Impacted Tests" value={String(impactAnalysis.impactedTests.length)} />
+                      <MiniStat label="High Risk Items" value={String(impactAnalysis.impactedTests.filter((test) => test.riskLevel === "High").length)} />
+                      <MiniStat label="Confidence" value={`${impactAnalysis.confidenceScore}%`} />
+                      <MiniStat label="Risk Level" value={impactAnalysis.riskLevel} />
+                    </div>
+                    <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold">Recommended Next Action</p>
+                        <Badge variant="outline">{impactAnalysis.status}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">{impactAnalysis.recommendation}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                      <p className="mb-3 text-sm font-semibold">Impacted Modules</p>
+                      <div className="flex flex-wrap gap-2">
+                        {impactAnalysis.impactedModules.map((moduleName) => <Badge key={moduleName} variant="outline">{moduleName}</Badge>)}
+                      </div>
+                    </div>
+                    <div className="overflow-hidden rounded-lg border border-border/40">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+                          <tr>
+                            <th className="px-3 py-2">Test File</th>
+                            <th className="px-3 py-2">Changed File</th>
+                            <th className="px-3 py-2">Action</th>
+                            <th className="px-3 py-2">Risk</th>
+                            <th className="px-3 py-2">Confidence</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/40">
+                          {impactAnalysis.impactedTests.map((test) => (
+                            <tr key={`${test.testFilePath}-${test.relatedChangedFile}`}>
+                              <td className="px-3 py-2 font-mono text-xs">{test.testFilePath}</td>
+                              <td className="px-3 py-2 font-mono text-xs">{test.relatedChangedFile}</td>
+                              <td className="px-3 py-2">{test.suggestedAction}</td>
+                              <td className="px-3 py-2"><Badge variant="outline">{test.riskLevel}</Badge></td>
+                              <td className="px-3 py-2">{test.confidenceScore}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {impactAnalysis.suggestions.map((suggestion) => (
+                        <div key={`${suggestion.title}-${suggestion.relatedChangedFile}`} className="rounded-lg border border-border/40 bg-card/70 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="font-semibold">{suggestion.title}</h4>
+                            <div className="flex gap-2">
+                              <Badge variant="outline">{suggestion.category}</Badge>
+                              <Badge variant="outline">{suggestion.priority}</Badge>
+                            </div>
+                          </div>
+                          <p className="mt-2 text-sm text-muted-foreground">{suggestion.description}</p>
+                          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                            {suggestion.relatedTestFile && <p>Test: <span className="font-mono">{suggestion.relatedTestFile}</span></p>}
+                            {suggestion.relatedChangedFile && <p>Changed file: <span className="font-mono">{suggestion.relatedChangedFile}</span></p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">Impact Report</p>
+                          <p className="mt-1 text-sm text-muted-foreground">Includes repository, branch, commit, changed files, impacted tests, risk, suggestions, and recommendation.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" disabled>Export PDF Coming Soon</Button>
+                          <Button variant="outline" disabled>Export Excel Coming Soon</Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">Sprint 3: Playwright Update Workflow</p>
+                          <p className="mt-1 text-sm text-muted-foreground">Generate proposed updates, approve changes, validate, and create a pull request.</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button onClick={generateTestUpdates} disabled={isUpdateGenerating}>
+                            {isUpdateGenerating ? <Loader2 className="size-4 animate-spin" /> : <Code2 className="size-4" />}
+                            Generate Test Updates
+                          </Button>
+                          <Button variant="outline" disabled={testUpdates.length === 0}>
+                            <Eye className="size-4" />
+                            View PR Preview
+                          </Button>
+                          <Button variant="outline" onClick={runValidation} disabled={!testUpdates.some((update) => update.status === "Approved" || update.status === "Edited") || isValidationRunning}>
+                            {isValidationRunning ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                            Run Validation
+                          </Button>
+                          <Button onClick={createImpactPr} disabled={!testUpdates.some((update) => update.status === "Approved" || update.status === "Edited") || isPrCreating}>
+                            {isPrCreating ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
+                            Create Pull Request
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <h4 className="font-semibold">Test Updates</h4>
+                      {testUpdates.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                          No generated Playwright updates yet.
+                        </div>
+                      ) : (
+                        testUpdates.map((update) => (
+                          <div key={update.id} className="rounded-lg border border-border/40 bg-card/70 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="break-words font-mono text-sm font-semibold">{update.testFilePath}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{update.updateSummary}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{update.impactReason}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="outline">{update.status}</Badge>
+                                <Badge variant="outline">{update.riskLevel}</Badge>
+                                <Badge variant="outline">{update.confidenceScore}%</Badge>
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                              <div>
+                                <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Old Code</p>
+                                <pre className="max-h-56 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{update.oldCode || "New file"}</pre>
+                              </div>
+                              <div>
+                                <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">New Proposed Code</p>
+                                <pre className="max-h-56 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{update.newCode}</pre>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button variant="outline" size="sm" onClick={() => updateTestUpdateStatus(update.id, "approve")}>Approve</Button>
+                              <Button variant="outline" size="sm" onClick={() => updateTestUpdateStatus(update.id, "reject")}>Reject</Button>
+                              <Button variant="outline" size="sm" onClick={() => updateTestUpdateStatus(update.id, "regenerate")}>Regenerate</Button>
+                              <Button variant="outline" size="sm" onClick={() => editTestUpdate(update)}>Edit Code</Button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">Validation</p>
+                          <p className="mt-1 text-sm text-muted-foreground">Validation runs against approved proposed updates before PR creation.</p>
+                        </div>
+                        {validationRun && <Badge variant="outline">{validationRun.status}</Badge>}
+                      </div>
+                      {validationRun ? (
+                        <div className="mt-4 space-y-3">
+                          <div className="grid gap-3 md:grid-cols-4">
+                            <MiniStat label="Total" value={String(validationRun.totalTests)} />
+                            <MiniStat label="Passed" value={String(validationRun.passed)} />
+                            <MiniStat label="Failed" value={String(validationRun.failed)} />
+                            <MiniStat label="Skipped" value={String(validationRun.skipped)} />
+                          </div>
+                          {validationRun.errorDetails && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{validationRun.errorDetails}</p>}
+                          {validationRun.failureExplanation && <p className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{validationRun.failureExplanation}</p>}
+                          <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.logs}</pre>
+                          {validationRun.failed > 0 && (
+                            <div className="space-y-2">
+                              <Button variant="outline" size="sm" onClick={generateFixSuggestion}>Generate Fix Suggestion</Button>
+                              {fixSuggestion && <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">{fixSuggestion}</p>}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-muted-foreground">No validation result yet.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ChangedFilesTable({ files }: { files: RepositoryActivity["changedFiles"] }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/40">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2">File Path</th>
+            <th className="px-3 py-2">Change</th>
+            <th className="px-3 py-2">Additions</th>
+            <th className="px-3 py-2">Deletions</th>
+            <th className="px-3 py-2">Module</th>
+            <th className="px-3 py-2">Risk</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/40">
+          {files.map((file) => (
+            <tr key={`${file.filePath}-${file.changeType}`}>
+              <td className="px-3 py-2 font-mono text-xs">{file.filePath}</td>
+              <td className="px-3 py-2">{file.changeType}</td>
+              <td className="px-3 py-2">{file.additions ?? "-"}</td>
+              <td className="px-3 py-2">{file.deletions ?? "-"}</td>
+              <td className="px-3 py-2">{file.possibleModule ?? "-"}</td>
+              <td className="px-3 py-2"><Badge variant="outline">{file.riskLevel ?? "Low"}</Badge></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -7535,6 +8332,9 @@ function Results({
   repositoryAnalysis,
   isPushingPlaywright,
   onPushPlaywright,
+  validationJob,
+  isValidatingPlaywright,
+  onValidatePlaywright,
 }: {
   plan: TestPlan;
   onExport?: (format: ExportFormat) => void;
@@ -7543,6 +8343,9 @@ function Results({
   repositoryAnalysis?: RepositoryAnalysis | null;
   isPushingPlaywright?: boolean;
   onPushPlaywright?: (fileName: string) => void;
+  validationJob?: PlaywrightValidationJob | null;
+  isValidatingPlaywright?: boolean;
+  onValidatePlaywright?: (fileName: string) => void;
 }) {
   const [isGitHubDialogOpen, setIsGitHubDialogOpen] = useState(false);
   const defaultSpecExtension = repositoryAnalysis?.language === "JavaScript" ? "js" : "ts";
@@ -7560,6 +8363,15 @@ function Results({
     navigator.clipboard.writeText(plan.playwright);
     toast.success("Copied Playwright test to clipboard");
   };
+  const validationStatus = validationJob?.result?.status ?? validationJob?.status;
+  const validationTone =
+    validationStatus === "Passed"
+      ? "border-success/30 bg-success/10 text-success"
+      : validationStatus === "Warning"
+        ? "border-warning/30 bg-warning/10 text-warning"
+        : validationStatus === "Failed" || validationStatus === "Error"
+          ? "border-destructive/30 bg-destructive/10 text-destructive"
+          : "border-primary/30 bg-primary/10 text-primary";
 
   return (
     <Card className="border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
@@ -7579,50 +8391,50 @@ function Results({
         </div>
       </div>
 
-      <Tabs defaultValue="positive" className="mt-6">
-        <TabsList className="h-auto flex-wrap justify-start gap-1 bg-surface/60">
-          <TabsTrigger value="positive">
+      <Tabs defaultValue="positive" className="mt-6 max-w-full overflow-hidden">
+        <TabsList className="h-auto max-w-full justify-start gap-1 overflow-x-auto overflow-y-hidden bg-surface/60 p-1">
+          <TabsTrigger value="positive" className="shrink-0 whitespace-nowrap text-sm">
             <CheckCircle2 className="size-3.5 text-success" /> Positive (
             {plan.positive?.length ?? 0})
           </TabsTrigger>
-          <TabsTrigger value="negative">
+          <TabsTrigger value="negative" className="shrink-0 whitespace-nowrap text-sm">
             <XCircle className="size-3.5 text-destructive" /> Negative ({plan.negative?.length ?? 0}
             )
           </TabsTrigger>
-          <TabsTrigger value="edge">
+          <TabsTrigger value="edge" className="shrink-0 whitespace-nowrap text-sm">
             <AlertTriangle className="size-3.5 text-warning" /> Edge ({plan.edge?.length ?? 0})
           </TabsTrigger>
-          <TabsTrigger value="data">
+          <TabsTrigger value="data" className="shrink-0 whitespace-nowrap text-sm">
             <Database className="size-3.5 text-accent" /> Test Data
           </TabsTrigger>
-          <TabsTrigger value="criteria">
+          <TabsTrigger value="criteria" className="shrink-0 whitespace-nowrap text-sm">
             <ClipboardCheck className="size-3.5 text-primary" /> Acceptance Criteria
           </TabsTrigger>
-          <TabsTrigger value="code">
+          <TabsTrigger value="code" className="shrink-0 whitespace-nowrap text-sm">
             <Code2 className="size-3.5 text-primary-glow" /> Playwright
           </TabsTrigger>
-          <TabsTrigger value="regression">
+          <TabsTrigger value="regression" className="shrink-0 whitespace-nowrap text-sm">
             <Layers className="size-3.5 text-primary" /> Regression Impact Analysis
           </TabsTrigger>
-          <TabsTrigger value="coverage">
+          <TabsTrigger value="coverage" className="shrink-0 whitespace-nowrap text-sm">
             <Gauge className="size-3.5 text-success" /> Test Coverage Score
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="positive" className="mt-4">
+        <TabsContent value="positive" className="mt-4 max-w-full overflow-hidden">
           <CaseList cases={plan.positive} accent="border-success/40 bg-success/10 text-success" />
         </TabsContent>
-        <TabsContent value="negative" className="mt-4">
+        <TabsContent value="negative" className="mt-4 max-w-full overflow-hidden">
           <CaseList
             cases={plan.negative}
             accent="border-destructive/40 bg-destructive/10 text-destructive"
           />
         </TabsContent>
-        <TabsContent value="edge" className="mt-4">
+        <TabsContent value="edge" className="mt-4 max-w-full overflow-hidden">
           <CaseList cases={plan.edge} accent="border-warning/40 bg-warning/10 text-warning" />
         </TabsContent>
 
-        <TabsContent value="data" className="mt-4">
+        <TabsContent value="data" className="mt-4 max-w-full overflow-hidden">
           {plan.testData?.length ? (
             <div className="overflow-hidden rounded-lg border border-border/40">
               <table className="w-full text-sm">
@@ -7651,7 +8463,7 @@ function Results({
           )}
         </TabsContent>
 
-        <TabsContent value="criteria" className="mt-4">
+        <TabsContent value="criteria" className="mt-4 max-w-full overflow-hidden">
           {plan.acceptanceCriteria?.length > 0 ? (
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
               <div className="mb-2 flex items-center gap-2">
@@ -7672,9 +8484,97 @@ function Results({
           )}
         </TabsContent>
 
-        <TabsContent value="code" className="mt-4">
-          <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950">
-            <div className="flex items-center justify-between border-b border-slate-700/80 px-4 py-2">
+        <TabsContent value="code" className="mt-4 max-w-full overflow-hidden">
+          <div className="mb-4 max-w-full overflow-hidden rounded-lg border border-border/50 bg-surface/50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="size-4 text-primary" />
+                  <h3 className="text-sm font-semibold">AI Test Validation</h3>
+                  {validationStatus && (
+                    <Badge variant="outline" className={validationTone}>
+                      {validationStatus}
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-1 max-w-4xl break-words text-sm leading-6 text-muted-foreground">
+                  Validate generated Playwright code for structure, assertions, locator quality, and PR readiness before pushing to GitHub.
+                </p>
+              </div>
+              {onValidatePlaywright && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onValidatePlaywright(githubFileName || `generated-playwright.spec.${defaultSpecExtension}`)}
+                  disabled={isValidatingPlaywright}
+                >
+                  {isValidatingPlaywright ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                  Run AI Test Validation
+                </Button>
+              )}
+            </div>
+
+            {validationJob?.result ? (
+              <div className="mt-4 grid gap-4 lg:grid-cols-[0.7fr_1.3fr]">
+                <div className="rounded-md border border-border/40 bg-card/70 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Validation Score</p>
+                  <div className="mt-2 flex items-end gap-2">
+                    <span className="text-3xl font-semibold">{validationJob.result.score}</span>
+                    <span className="pb-1 text-sm text-muted-foreground">/ 100</span>
+                  </div>
+                  <Progress value={validationJob.result.score} className="mt-3 h-2" />
+                  <p className="mt-3 text-sm text-muted-foreground">{validationJob.result.summary}</p>
+                </div>
+                <div className="space-y-3">
+                  {validationJob.result.issues.length > 0 ? (
+                    validationJob.result.issues.map((issue) => (
+                      <div key={issue.id} className="rounded-md border border-border/40 bg-card/70 p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className={
+                            issue.severity === "Error"
+                              ? "border-destructive/30 bg-destructive/10 text-destructive"
+                              : issue.severity === "Warning"
+                                ? "border-warning/30 bg-warning/10 text-warning"
+                                : "border-primary/30 bg-primary/10 text-primary"
+                          }>
+                            {issue.severity}
+                          </Badge>
+                          <span className="font-medium">{issue.category}</span>
+                          {issue.line && <span className="text-xs text-muted-foreground">Line {issue.line}</span>}
+                        </div>
+                        <p className="mt-2 text-foreground">{issue.message}</p>
+                        <p className="mt-1 text-muted-foreground">{issue.recommendation}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success">
+                      No blocking validation issues were found.
+                    </div>
+                  )}
+                  {validationJob.result.recommendations.length > 0 && (
+                    <div className="rounded-md border border-border/40 bg-card/70 p-3">
+                      <p className="text-sm font-medium">Reviewer Notes</p>
+                      <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                        {validationJob.result.recommendations.map((recommendation) => (
+                          <li key={recommendation} className="flex gap-2">
+                            <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+                            <span>{recommendation}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-md border border-dashed border-border/60 bg-card/40 p-3 text-sm text-muted-foreground">
+                Run validation to review Playwright quality before creating a GitHub pull request.
+              </div>
+            )}
+          </div>
+
+          <div className="max-w-full overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/80 px-4 py-2">
               <span className="font-mono text-xs text-slate-300">playwright.spec.ts</span>
               <div className="flex flex-wrap gap-2">
                 {onPushPlaywright && (
@@ -7702,6 +8602,10 @@ function Results({
                             />
                             <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">
                               Target path: <span className="font-mono text-foreground">{repositoryAnalysis?.testFolderPath || githubConfig.testFolderPath}/{githubFileName || `file.spec.${defaultSpecExtension}`}</span>
+                            </p>
+                            <p className={cn("rounded-md border p-3 text-sm", validationTone)}>
+                              Validation status: <strong>{validationStatus || "Not Run"}</strong>
+                              {validationJob?.result ? ` · Score ${validationJob.result.score}/100` : " · Run AI Test Validation before creating the PR for best results."}
                             </p>
                             {repositoryAnalysis && (
                               <div className="grid gap-2 rounded-md border border-border/40 bg-surface/40 p-3 text-xs text-muted-foreground sm:grid-cols-2">
@@ -7742,17 +8646,17 @@ function Results({
                 </Button>
               </div>
             </div>
-            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-100">
+            <pre className="max-h-[520px] max-w-full overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-100">
               <code>{plan.playwright}</code>
             </pre>
           </div>
         </TabsContent>
 
-        <TabsContent value="regression" className="mt-4">
+        <TabsContent value="regression" className="mt-4 max-w-full overflow-hidden">
           <RegressionImpactAnalysisTab analysis={plan.regressionImpact} />
         </TabsContent>
 
-        <TabsContent value="coverage" className="mt-4">
+        <TabsContent value="coverage" className="mt-4 max-w-full overflow-hidden">
           <TestCoverageScoreTab analysis={plan.coverageAnalysis} />
         </TabsContent>
       </Tabs>

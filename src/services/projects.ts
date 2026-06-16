@@ -37,8 +37,14 @@ export type AIProviderFeatureName =
   | "ai-chat"
   | "playwright-generation"
   | "requirement-impact"
-  | "coverage-score";
+  | "coverage-score"
+  | "repository-impact"
+  | "repository-test-update"
+  | "playwright-validation-failure"
+  | "repository-fix-suggestion";
 export type AIProviderUsageStatus = "Success" | "Failed";
+export type PlaywrightValidationStatus = "Queued" | "Running" | "Passed" | "Failed" | "Warning" | "Error";
+export type PlaywrightValidationSeverity = "Info" | "Warning" | "Error";
 export type ReviewAction =
   | "Submitted for Review"
   | "Approved"
@@ -153,6 +159,52 @@ export interface AuthContextResponse {
   permissions: string[];
 }
 
+export interface PlaywrightValidationIssue {
+  id: string;
+  severity: PlaywrightValidationSeverity;
+  category: string;
+  message: string;
+  recommendation: string;
+  line?: number;
+}
+
+export interface PlaywrightValidationResult {
+  score: number;
+  status: PlaywrightValidationStatus;
+  summary: string;
+  issues: PlaywrightValidationIssue[];
+  recommendations: string[];
+  checkedAt: string;
+  durationMs: number;
+}
+
+export interface PlaywrightValidationJob {
+  id: string;
+  workspaceId?: string;
+  projectId?: string;
+  moduleId?: string;
+  requirementId?: string;
+  requirementTitle?: string;
+  fileName: string;
+  playwrightCode: string;
+  status: PlaywrightValidationStatus;
+  result?: PlaywrightValidationResult;
+  errorMessage?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePlaywrightValidationJobInput {
+  workspaceId?: string;
+  projectId?: string;
+  moduleId?: string;
+  requirementId?: string;
+  requirementTitle?: string;
+  fileName: string;
+  playwrightCode: string;
+}
+
 export interface AuthResponse extends AuthContextResponse {
   accessToken: string;
   expiresAt: string;
@@ -255,6 +307,84 @@ export interface SaveGitHubAutomationConfigInput {
   testFolderPath: string;
 }
 
+export interface ApplicationRepositoryConfig {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryType: ApplicationRepositoryType;
+  provider: "github";
+  tokenMasked: string;
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  webhookSecretMasked: string;
+  webhookUrl: string;
+  webhookId?: number;
+  webhookStatus: ApplicationRepositoryStatus;
+  webhookError?: string;
+  lastEventReceivedAt?: string;
+  lastSyncedAt?: string;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  manualSetup?: {
+    webhookUrl: string;
+    contentType: string;
+    secret: string;
+    events: string[];
+    message?: string;
+  };
+}
+
+export interface SaveApplicationRepositoryInput {
+  workspaceId: string;
+  projectId?: string;
+  repositoryType: ApplicationRepositoryType;
+  token: string;
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  webhookSecret?: string;
+}
+
+export interface RepositoryActivityChangedFile {
+  filePath: string;
+  changeType: RepositoryChangeType | "Renamed";
+  additions?: number;
+  deletions?: number;
+  patch?: string;
+  possibleModule?: string;
+  riskLevel?: RepositoryRiskLevel;
+}
+
+export interface RepositoryActivity {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryConfigId: string;
+  repositoryType: ApplicationRepositoryType | "automation";
+  provider: "github";
+  eventType: "push" | "pull_request";
+  action?: string;
+  repoOwner: string;
+  repoName: string;
+  branch?: string;
+  commitSha?: string;
+  previousCommitSha?: string;
+  pullRequestNumber?: number;
+  pullRequestTitle?: string;
+  pullRequestUrl?: string;
+  author?: string;
+  message?: string;
+  changedFiles: RepositoryActivityChangedFile[];
+  fileCount: number;
+  status: RepositoryActivityStatus;
+  deliveryId?: string;
+  rawMetadata?: unknown;
+  createdAt: string;
+}
+
 export interface PushPlaywrightToGitHubInput {
   workspaceId: string;
   fileName: string;
@@ -288,6 +418,124 @@ export type RepositorySyncStatus = "Pending" | "Completed" | "Failed";
 export type RepositoryChangeType = "Added" | "Modified" | "Deleted";
 export type RepositoryRiskLevel = "Low" | "Medium" | "High";
 export type RepositorySuggestedAction = "Update" | "Add" | "Review" | "No Action";
+export type ApplicationRepositoryType = "frontend" | "backend";
+export type ApplicationRepositoryStatus = "Connected" | "Failed" | "Pending";
+export type RepositoryActivityStatus = "New" | "Reviewed" | "Ignored";
+export type RepositoryImpactAnalysisStatus = "Pending" | "Completed" | "Failed" | "Reviewed";
+export type RepositoryImpactSuggestedAction = "Update Test" | "Add New Test" | "Review Manually" | "No Action";
+export type RepositoryImpactSuggestionCategory =
+  | "Automation"
+  | "Manual Testing"
+  | "Regression"
+  | "Data"
+  | "API"
+  | "UI";
+export type RepositoryGeneratedTestUpdateStatus = "Pending" | "Approved" | "Rejected" | "Edited";
+export type RepositoryValidationRunStatus = "Pending" | "Running" | "Passed" | "Failed" | "Completed";
+export type RepositoryUpdatePullRequestStatus = "Created" | "Failed";
+
+export interface RepositoryImpactAnalysisTest {
+  testFilePath: string;
+  relatedChangedFile: string;
+  impactReason: string;
+  suggestedAction: RepositoryImpactSuggestedAction;
+  riskLevel: RepositoryRiskLevel;
+  confidenceScore: number;
+}
+
+export interface RepositoryImpactAnalysisSuggestion {
+  title: string;
+  description: string;
+  category: RepositoryImpactSuggestionCategory;
+  priority: RepositoryRiskLevel;
+  relatedTestFile?: string;
+  relatedChangedFile?: string;
+}
+
+export interface RepositoryImpactAnalysis {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryActivityId: string;
+  applicationRepositoryId: string;
+  automationRepositoryId?: string;
+  provider: "github";
+  repoOwner: string;
+  repoName: string;
+  branch?: string;
+  commitSha?: string;
+  changedFiles: RepositoryActivityChangedFile[];
+  impactedModules: string[];
+  impactedTests: RepositoryImpactAnalysisTest[];
+  suggestions: RepositoryImpactAnalysisSuggestion[];
+  riskLevel: RepositoryRiskLevel;
+  confidenceScore: number;
+  recommendation: string;
+  status: RepositoryImpactAnalysisStatus;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepositoryGeneratedTestUpdate {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  impactAnalysisId: string;
+  testFilePath: string;
+  oldCode: string;
+  newCode: string;
+  updateSummary: string;
+  impactReason: string;
+  confidenceScore: number;
+  riskLevel: RepositoryRiskLevel;
+  suggestedAction: RepositoryImpactSuggestedAction;
+  status: RepositoryGeneratedTestUpdateStatus;
+  aiProvider: string;
+  aiModel: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepositoryValidationRun {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  impactAnalysisId: string;
+  status: RepositoryValidationRunStatus;
+  totalTests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration: number;
+  browser: string;
+  environment: string;
+  logs: string;
+  errorDetails?: string;
+  failureExplanation?: string;
+  screenshots: string[];
+  videos: string[];
+  reportUrl?: string;
+  createdBy?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface RepositoryUpdatePullRequest {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  impactAnalysisId: string;
+  branchName: string;
+  pullRequestUrl?: string;
+  pullRequestNumber?: number;
+  updatedFiles: string[];
+  validationRunId?: string;
+  status: RepositoryUpdatePullRequestStatus;
+  createdBy?: string;
+  createdAt: string;
+}
 
 export interface RepositoryAnalysis {
   id: string;
@@ -1291,6 +1539,84 @@ export const projectApi = {
       method: "POST",
       body: JSON.stringify({ workspaceId }),
     }),
+  connectApplicationRepository: (input: SaveApplicationRepositoryInput) =>
+    apiRequest<ApplicationRepositoryConfig>("/api/integrations/github/application-repos/connect", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listApplicationRepositories: (workspaceId: string) =>
+    apiRequest<ApplicationRepositoryConfig[]>(`/api/integrations/github/application-repos?workspaceId=${encodeURIComponent(workspaceId)}`),
+  getApplicationRepository: (configId: string) =>
+    apiRequest<ApplicationRepositoryConfig>(`/api/integrations/github/application-repos/${configId}`),
+  testApplicationRepositoryConnection: (configId: string) =>
+    apiRequest<{ ok: boolean; repository: string; defaultBranch: string; url: string }>(
+      `/api/integrations/github/application-repos/${configId}/test-connection`,
+      { method: "POST" },
+    ),
+  registerApplicationRepositoryWebhook: (configId: string) =>
+    apiRequest<ApplicationRepositoryConfig & { manualSetup?: ApplicationRepositoryConfig["manualSetup"] }>(
+      `/api/integrations/github/application-repos/${configId}/register-webhook`,
+      { method: "POST" },
+    ),
+  deleteApplicationRepository: (configId: string) =>
+    apiRequest<void>(`/api/integrations/github/application-repos/${configId}`, { method: "DELETE" }),
+  listRepositoryActivity: (workspaceId: string, filters: { repositoryConfigId?: string; status?: RepositoryActivityStatus } = {}) => {
+    const params = new URLSearchParams({ workspaceId });
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+    return apiRequest<RepositoryActivity[]>(`/api/integrations/github/repository-activity?${params.toString()}`);
+  },
+  getRepositoryActivity: (activityId: string) =>
+    apiRequest<RepositoryActivity>(`/api/integrations/github/repository-activity/${activityId}`),
+  updateRepositoryActivityStatus: (activityId: string, status: RepositoryActivityStatus) =>
+    apiRequest<RepositoryActivity>(`/api/integrations/github/repository-activity/${activityId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  runRepositoryImpactAnalysis: (activityId: string) =>
+    apiRequest<RepositoryImpactAnalysis>(`/api/integrations/github/repository-activity/${activityId}/impact-analysis`, {
+      method: "POST",
+    }),
+  getRepositoryImpactAnalysis: (activityId: string) =>
+    apiRequest<RepositoryImpactAnalysis>(`/api/integrations/github/repository-activity/${activityId}/impact-analysis`),
+  regenerateRepositoryImpactAnalysis: (activityId: string) =>
+    apiRequest<RepositoryImpactAnalysis>(`/api/integrations/github/repository-activity/${activityId}/impact-analysis/regenerate`, {
+      method: "POST",
+    }),
+  updateRepositoryImpactAnalysisStatus: (impactAnalysisId: string, status: RepositoryImpactAnalysisStatus) =>
+    apiRequest<RepositoryImpactAnalysis>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  generateRepositoryTestUpdates: (impactAnalysisId: string) =>
+    apiRequest<RepositoryGeneratedTestUpdate[]>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/generate-test-updates`, {
+      method: "POST",
+    }),
+  listRepositoryTestUpdates: (impactAnalysisId: string) =>
+    apiRequest<RepositoryGeneratedTestUpdate[]>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/test-updates`),
+  approveRepositoryTestUpdate: (updateId: string) =>
+    apiRequest<RepositoryGeneratedTestUpdate>(`/api/integrations/github/test-updates/${updateId}/approve`, { method: "PATCH" }),
+  rejectRepositoryTestUpdate: (updateId: string) =>
+    apiRequest<RepositoryGeneratedTestUpdate>(`/api/integrations/github/test-updates/${updateId}/reject`, { method: "PATCH" }),
+  editRepositoryTestUpdate: (updateId: string, input: { newCode: string; updateSummary?: string }) =>
+    apiRequest<RepositoryGeneratedTestUpdate>(`/api/integrations/github/test-updates/${updateId}/edit`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  regenerateRepositoryTestUpdate: (updateId: string) =>
+    apiRequest<RepositoryGeneratedTestUpdate>(`/api/integrations/github/test-updates/${updateId}/regenerate`, { method: "POST" }),
+  runRepositoryUpdateValidation: (impactAnalysisId: string) =>
+    apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/run-validation`, { method: "POST" }),
+  getRepositoryUpdateValidation: (impactAnalysisId: string) =>
+    apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-result`),
+  generateRepositoryFixSuggestion: (impactAnalysisId: string) =>
+    apiRequest<{ suggestion: string }>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/generate-fix-suggestion`, { method: "POST" }),
+  createRepositoryImpactPullRequest: (impactAnalysisId: string) =>
+    apiRequest<RepositoryUpdatePullRequest & { pullRequest?: { html_url: string; number: number; branchName: string; updatedFiles: string[] } }>(
+      `/api/integrations/github/impact-analysis/${impactAnalysisId}/create-pr`,
+      { method: "POST" },
+    ),
   analyzeGitHubRepository: (workspaceId: string) =>
     apiRequest<RepositoryAnalysis>("/api/integrations/github/analyze-repository", {
       method: "POST",
@@ -1335,6 +1661,15 @@ export const projectApi = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  createPlaywrightValidationJob: (input: CreatePlaywrightValidationJobInput) =>
+    apiRequest<PlaywrightValidationJob>("/api/playwright-validation/jobs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  getPlaywrightValidationJob: (jobId: string) =>
+    apiRequest<PlaywrightValidationJob>(`/api/playwright-validation/jobs/${jobId}`),
+  listPlaywrightValidationJobs: (filters: { workspaceId?: string; projectId?: string; requirementId?: string } = {}) =>
+    apiRequest<PlaywrightValidationJob[]>(`/api/playwright-validation/jobs${executionQueryString(filters)}`),
   getAnalyticsSummary: (filters: AnalyticsFilters = {}) =>
     apiRequest<AnalyticsSummary>(`/api/analytics/summary${analyticsQueryString(filters)}`),
   getAnalyticsCoverage: (filters: AnalyticsFilters = {}) =>
