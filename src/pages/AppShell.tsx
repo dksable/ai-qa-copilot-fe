@@ -49,6 +49,7 @@ import {
   TrendingUp,
   UserCircle,
   Puzzle,
+  ExternalLink,
 } from "lucide-react";
 import {
   Area,
@@ -151,6 +152,7 @@ import {
   type RepositoryImpactAnalysisStatus,
   type RepositoryGeneratedTestUpdate,
   type RepositoryValidationRun,
+  type RepositoryValidationRecommendation,
   type RepositorySync,
   type ReviewDetail,
   type Workspace,
@@ -4354,8 +4356,10 @@ function RepositoryActivityPanel({
   const [isImpactRunning, setIsImpactRunning] = useState(false);
   const [testUpdates, setTestUpdates] = useState<RepositoryGeneratedTestUpdate[]>([]);
   const [validationRun, setValidationRun] = useState<RepositoryValidationRun | null>(null);
+  const [validationRecommendation, setValidationRecommendation] = useState<RepositoryValidationRecommendation | null>(null);
   const [isUpdateGenerating, setIsUpdateGenerating] = useState(false);
   const [isValidationRunning, setIsValidationRunning] = useState(false);
+  const [isRecommendationLoading, setIsRecommendationLoading] = useState(false);
   const [isPrCreating, setIsPrCreating] = useState(false);
   const [fixSuggestion, setFixSuggestion] = useState("");
   const totalFiles = activities.reduce((sum, activity) => sum + activity.fileCount, 0);
@@ -4363,6 +4367,8 @@ function RepositoryActivityPanel({
   const approvedOrEditedUpdates = testUpdates.filter((update) => update.status === "Approved" || update.status === "Edited");
   const hasApprovedOrEditedUpdates = approvedOrEditedUpdates.length > 0;
   const validationPassed = validationRun?.status === "Passed" && validationRun.failed === 0;
+  const recommendationBlocksPr = validationRecommendation?.releaseRecommendation === "Do Not Merge";
+  const recommendationWarnsPr = validationRecommendation?.releaseRecommendation === "Merge with Caution";
 
   useEffect(() => {
     if (!activeActivity) {
@@ -4378,13 +4384,16 @@ function RepositoryActivityPanel({
           projectApi.listRepositoryTestUpdates(analysis.id).catch(() => []),
           projectApi.getRepositoryUpdateValidation(analysis.id).catch(() => null),
         ]);
+        const recommendation = await projectApi.getRepositoryValidationRecommendation(analysis.id).catch(() => null);
         setTestUpdates(updates);
         setValidationRun(validation);
+        setValidationRecommendation(recommendation);
       })
       .catch(() => {
         setImpactAnalysis(null);
         setTestUpdates([]);
         setValidationRun(null);
+        setValidationRecommendation(null);
       })
       .finally(() => setIsImpactLoading(false));
   }, [activeActivity]);
@@ -4409,6 +4418,7 @@ function RepositoryActivityPanel({
       setImpactAnalysis(analysis);
       setTestUpdates([]);
       setValidationRun(null);
+      setValidationRecommendation(null);
       toast.success(regenerate ? "Impact analysis regenerated" : "Impact analysis completed");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Impact analysis failed");
@@ -4466,11 +4476,28 @@ function RepositoryActivityPanel({
       setIsValidationRunning(true);
       const run = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id);
       setValidationRun(run);
+      setValidationRecommendation(null);
       toast.success(run.status === "Failed" ? "Validation completed with failures" : "Validation passed");
+      void loadValidationRecommendation(impactAnalysis.id, false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Validation failed");
     } finally {
       setIsValidationRunning(false);
+    }
+  };
+
+  const loadValidationRecommendation = async (impactAnalysisId: string, regenerate: boolean) => {
+    try {
+      setIsRecommendationLoading(true);
+      const recommendation = regenerate
+        ? await projectApi.regenerateRepositoryValidationRecommendation(impactAnalysisId)
+        : await projectApi.generateRepositoryValidationRecommendation(impactAnalysisId);
+      setValidationRecommendation(recommendation);
+      toast.success(regenerate ? "AI recommendation regenerated" : "AI recommendation generated");
+    } catch {
+      toast.warning("AI recommendation could not be generated. Validation result is still available.");
+    } finally {
+      setIsRecommendationLoading(false);
     }
   };
 
@@ -4479,6 +4506,7 @@ function RepositoryActivityPanel({
     try {
       const result = await projectApi.generateRepositoryFixSuggestion(impactAnalysis.id);
       setFixSuggestion(result.suggestion);
+      if (result.validationRun) setValidationRun(result.validationRun);
       toast.success("Fix suggestion generated");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate fix suggestion");
@@ -4491,10 +4519,12 @@ function RepositoryActivityPanel({
       toast.error("Run validation before creating the pull request.");
       return;
     }
-    if (!validationPassed && !window.confirm("Validation did not pass. Create PR anyway for QA review?")) return;
+    const force = !validationPassed || recommendationBlocksPr || recommendationWarnsPr;
+    if (recommendationBlocksPr && !window.confirm("AI recommendation says Do Not Merge. Owner/Admin override should be used only for exceptional QA review. Create PR anyway?")) return;
+    if (!recommendationBlocksPr && force && !window.confirm("Validation or AI recommendation requires caution. Create PR anyway for QA review?")) return;
     try {
       setIsPrCreating(true);
-      const result = await projectApi.createRepositoryImpactPullRequest(impactAnalysis.id);
+      const result = await projectApi.createRepositoryImpactPullRequest(impactAnalysis.id, force);
       toast.success(
         <span>
           Pull Request created:{" "}
@@ -4806,13 +4836,32 @@ function RepositoryActivityPanel({
                               ? "Validation passed. Approved Playwright updates are ready for pull request review."
                               : "Validation completed with failures. Review the error details before creating a pull request."}
                           </div>
-                          <div className="grid gap-3 md:grid-cols-6">
+                          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+                            <MiniStat label="Status" value={validationRun.status} />
                             <MiniStat label="Total" value={String(validationRun.totalTests)} />
                             <MiniStat label="Passed" value={String(validationRun.passed)} />
                             <MiniStat label="Failed" value={String(validationRun.failed)} />
                             <MiniStat label="Skipped" value={String(validationRun.skipped)} />
                             <MiniStat label="Duration" value={`${Math.round(validationRun.duration / 1000)}s`} />
-                            <MiniStat label="Status" value={validationRun.status} />
+                            <MiniStat label="Browser" value={validationRun.browser || "-"} />
+                            <MiniStat label="Environment" value={validationRun.environment || "-"} />
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/40 bg-card/70 p-3 text-sm">
+                            <span className="font-semibold">Command:</span>
+                            <code className="break-all rounded bg-slate-950 px-2 py-1 text-xs text-slate-100">{validationRun.command || "npx playwright test --reporter=json,html --workers=1"}</code>
+                            {validationRun.reportUrl ? (
+                              <a
+                                className="ml-auto inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                                href={validationRun.reportUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <ExternalLink className="size-4" />
+                                View HTML Report
+                              </a>
+                            ) : (
+                              <Badge variant="outline" className="ml-auto">HTML report available in backend artifacts when generated</Badge>
+                            )}
                           </div>
                           {validationRun.failedTestNames?.length ? (
                             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
@@ -4822,8 +4871,43 @@ function RepositoryActivityPanel({
                               </ul>
                             </div>
                           ) : null}
+                          {validationRun.failedTests?.length ? (
+                            <div className="overflow-hidden rounded-lg border border-border/40 bg-card/70">
+                              <table className="w-full text-left text-sm">
+                                <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+                                  <tr>
+                                    <th className="px-3 py-2">Test File</th>
+                                    <th className="px-3 py-2">Test Name</th>
+                                    <th className="px-3 py-2">Error Message</th>
+                                    <th className="px-3 py-2">Duration</th>
+                                    <th className="px-3 py-2">Suggested Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/40">
+                                  {validationRun.failedTests.map((test, index) => (
+                                    <tr key={`${test.testFile}-${test.testName}-${index}`}>
+                                      <td className="max-w-[180px] break-words px-3 py-2 font-mono text-xs">{test.testFile}</td>
+                                      <td className="px-3 py-2 font-medium">{test.testName}</td>
+                                      <td className="max-w-sm break-words px-3 py-2 text-destructive">{test.errorMessage}</td>
+                                      <td className="px-3 py-2">{Math.round(test.duration / 1000)}s</td>
+                                      <td className="px-3 py-2 text-muted-foreground">{test.suggestedAction}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : null}
                           {validationRun.errorDetails && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{validationRun.errorDetails}</p>}
-                          {validationRun.failureExplanation && <p className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{validationRun.failureExplanation}</p>}
+                          {(validationRun.aiFailureExplanation || validationRun.failureExplanation) && (
+                            <p className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                              {validationRun.aiFailureExplanation || validationRun.failureExplanation}
+                            </p>
+                          )}
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <MiniStat label="Screenshots" value={String(validationRun.screenshots?.length ?? 0)} />
+                            <MiniStat label="Videos" value={String(validationRun.videos?.length ?? 0)} />
+                            <MiniStat label="Traces" value={String(validationRun.traceFiles?.length ?? 0)} />
+                          </div>
                           <div className="grid gap-3 lg:grid-cols-2">
                             <div>
                               <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">stdout</p>
@@ -4838,12 +4922,84 @@ function RepositoryActivityPanel({
                             <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Validation Summary Log</p>
                             <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.logs}</pre>
                           </div>
+                          {validationRun.stackTrace && (
+                            <div>
+                              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Stack Trace</p>
+                              <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.stackTrace}</pre>
+                            </div>
+                          )}
+                          {validationRun.jsonReportData ? (
+                            <details className="rounded-lg border border-border/40 bg-card/70 p-3">
+                              <summary className="cursor-pointer text-sm font-semibold">Raw JSON Report</summary>
+                              <pre className="mt-3 max-h-72 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">
+                                {JSON.stringify(validationRun.jsonReportData, null, 2)}
+                              </pre>
+                            </details>
+                          ) : null}
                           {validationRun.failed > 0 && (
                             <div className="space-y-2">
-                              <Button variant="outline" size="sm" onClick={generateFixSuggestion}>Generate Fix Suggestion</Button>
+                              <Button variant="outline" size="sm" onClick={generateFixSuggestion}>Generate AI Failure Explanation</Button>
                               {fixSuggestion && <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">{fixSuggestion}</p>}
                             </div>
                           )}
+                          <div className={`rounded-lg border p-4 ${
+                            validationRecommendation?.releaseRecommendation === "Safe to Merge"
+                              ? "border-success/30 bg-success/10"
+                              : validationRecommendation?.releaseRecommendation === "Do Not Merge"
+                                ? "border-destructive/30 bg-destructive/10"
+                                : "border-warning/30 bg-warning/10"
+                          }`}>
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="font-semibold">AI Recommendation</p>
+                                <p className="mt-1 text-sm text-muted-foreground">Decision support generated from validation results, impact analysis, and approved test updates.</p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isRecommendationLoading}
+                                onClick={() => impactAnalysis && loadValidationRecommendation(impactAnalysis.id, true)}
+                              >
+                                {isRecommendationLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                                Regenerate AI Recommendation
+                              </Button>
+                            </div>
+                            {validationRecommendation ? (
+                              <div className="mt-4 space-y-4">
+                                <div className="grid gap-3 md:grid-cols-4">
+                                  <MiniStat label="Confidence" value={`${validationRecommendation.confidenceScore}%`} />
+                                  <MiniStat label="Risk Level" value={validationRecommendation.riskLevel} />
+                                  <MiniStat label="Recommendation" value={validationRecommendation.releaseRecommendation} />
+                                  <MiniStat label="Merge Decision" value={validationRecommendation.mergeDecision} />
+                                </div>
+                                <p className="rounded-md border border-border/40 bg-card/70 p-3 text-sm">{validationRecommendation.summary}</p>
+                                <div className="grid gap-4 lg:grid-cols-2">
+                                  <div>
+                                    <p className="mb-2 text-sm font-semibold">Reasons</p>
+                                    <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                                      {validationRecommendation.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <p className="mb-2 text-sm font-semibold">Recommended Actions</p>
+                                    <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                                      {validationRecommendation.recommendedActions.map((action) => <li key={action}>{action}</li>)}
+                                    </ul>
+                                  </div>
+                                </div>
+                                <div className="rounded-md border border-border/40 bg-card/70 p-3">
+                                  <p className="text-xs font-semibold uppercase text-muted-foreground">QA Owner Action</p>
+                                  <p className="mt-1 text-sm">{validationRecommendation.qaOwnerAction}</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-4 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                                {isRecommendationLoading
+                                  ? "Generating AI recommendation from validation result..."
+                                  : "AI recommendation could not be generated yet. Validation result is still available."}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <div className="mt-3 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">

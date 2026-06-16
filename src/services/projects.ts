@@ -431,8 +431,11 @@ export type RepositoryImpactSuggestionCategory =
   | "API"
   | "UI";
 export type RepositoryGeneratedTestUpdateStatus = "Pending" | "Approved" | "Rejected" | "Edited";
-export type RepositoryValidationRunStatus = "Pending" | "Running" | "Passed" | "Failed" | "Completed";
+export type RepositoryValidationRunStatus = "Pending" | "Running" | "Passed" | "Failed" | "Completed" | "Error";
 export type RepositoryUpdatePullRequestStatus = "Created" | "Failed";
+export type RepositoryValidationReleaseRecommendation = "Safe to Merge" | "Merge with Caution" | "Do Not Merge";
+export type RepositoryValidationMergeDecision = "Approved" | "Warning" | "Blocked";
+export type RepositoryValidationRecommendationStatus = "Generated" | "Regenerated" | "Failed";
 
 export interface RepositoryImpactAnalysisTest {
   testFilePath: string;
@@ -511,16 +514,31 @@ export interface RepositoryValidationRun {
   duration: number;
   browser: string;
   environment: string;
+  command?: string;
   logs: string;
   stdout?: string;
   stderr?: string;
   failedTestNames?: string[];
+  failedTests?: Array<{
+    testFile: string;
+    testName: string;
+    errorMessage: string;
+    duration: number;
+    suggestedAction: string;
+    stackTrace?: string;
+  }>;
+  stackTrace?: string;
   validationWorkspacePath?: string;
   errorDetails?: string;
   failureExplanation?: string;
+  aiFailureExplanation?: string;
   screenshots: string[];
   videos: string[];
+  traceFiles?: string[];
   reportUrl?: string;
+  jsonReportPath?: string;
+  htmlReportPath?: string;
+  jsonReportData?: unknown;
   createdBy?: string;
   createdAt: string;
   completedAt?: string;
@@ -539,6 +557,28 @@ export interface RepositoryUpdatePullRequest {
   status: RepositoryUpdatePullRequestStatus;
   createdBy?: string;
   createdAt: string;
+}
+
+export interface RepositoryValidationRecommendation {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  impactAnalysisId: string;
+  validationRunId: string;
+  confidenceScore: number;
+  releaseRecommendation: RepositoryValidationReleaseRecommendation;
+  riskLevel: RepositoryRiskLevel;
+  summary: string;
+  reasons: string[];
+  recommendedActions: string[];
+  mergeDecision: RepositoryValidationMergeDecision;
+  qaOwnerAction: string;
+  aiProvider: string;
+  aiModel: string;
+  status: RepositoryValidationRecommendationStatus;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RepositoryAnalysis {
@@ -1614,12 +1654,18 @@ export const projectApi = {
     apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/run-validation`, { method: "POST" }),
   getRepositoryUpdateValidation: (impactAnalysisId: string) =>
     apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-result`),
+  generateRepositoryValidationRecommendation: (impactAnalysisId: string) =>
+    apiRequest<RepositoryValidationRecommendation>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-recommendation`, { method: "POST" }),
+  getRepositoryValidationRecommendation: (impactAnalysisId: string) =>
+    apiRequest<RepositoryValidationRecommendation>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-recommendation`),
+  regenerateRepositoryValidationRecommendation: (impactAnalysisId: string) =>
+    apiRequest<RepositoryValidationRecommendation>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-recommendation/regenerate`, { method: "POST" }),
   generateRepositoryFixSuggestion: (impactAnalysisId: string) =>
-    apiRequest<{ suggestion: string }>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/generate-fix-suggestion`, { method: "POST" }),
-  createRepositoryImpactPullRequest: (impactAnalysisId: string) =>
+    apiRequest<{ suggestion: string; validationRun?: RepositoryValidationRun }>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/failure-explanation`, { method: "POST" }),
+  createRepositoryImpactPullRequest: (impactAnalysisId: string, force = false) =>
     apiRequest<RepositoryUpdatePullRequest & { pullRequest?: { html_url: string; number: number; branchName: string; updatedFiles: string[] } }>(
       `/api/integrations/github/impact-analysis/${impactAnalysisId}/create-pr`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ force }) },
     ),
   analyzeGitHubRepository: (workspaceId: string) =>
     apiRequest<RepositoryAnalysis>("/api/integrations/github/analyze-repository", {
