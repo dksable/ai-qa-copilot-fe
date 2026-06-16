@@ -4360,6 +4360,9 @@ function RepositoryActivityPanel({
   const [fixSuggestion, setFixSuggestion] = useState("");
   const totalFiles = activities.reduce((sum, activity) => sum + activity.fileCount, 0);
   const lastActivity = activities[0]?.createdAt;
+  const approvedOrEditedUpdates = testUpdates.filter((update) => update.status === "Approved" || update.status === "Edited");
+  const hasApprovedOrEditedUpdates = approvedOrEditedUpdates.length > 0;
+  const validationPassed = validationRun?.status === "Passed" && validationRun.failed === 0;
 
   useEffect(() => {
     if (!activeActivity) {
@@ -4484,7 +4487,11 @@ function RepositoryActivityPanel({
 
   const createImpactPr = async () => {
     if (!impactAnalysis) return;
-    if (validationRun?.status === "Failed" && !window.confirm("Validation failed. Create PR anyway for QA review?")) return;
+    if (!validationRun) {
+      toast.error("Run validation before creating the pull request.");
+      return;
+    }
+    if (!validationPassed && !window.confirm("Validation did not pass. Create PR anyway for QA review?")) return;
     try {
       setIsPrCreating(true);
       const result = await projectApi.createRepositoryImpactPullRequest(impactAnalysis.id);
@@ -4728,11 +4735,11 @@ function RepositoryActivityPanel({
                             <Eye className="size-4" />
                             View PR Preview
                           </Button>
-                          <Button variant="outline" onClick={runValidation} disabled={!testUpdates.some((update) => update.status === "Approved" || update.status === "Edited") || isValidationRunning}>
+                          <Button variant="outline" onClick={runValidation} disabled={!hasApprovedOrEditedUpdates || isValidationRunning}>
                             {isValidationRunning ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
                             Run Validation
                           </Button>
-                          <Button onClick={createImpactPr} disabled={!testUpdates.some((update) => update.status === "Approved" || update.status === "Edited") || isPrCreating}>
+                          <Button onClick={createImpactPr} disabled={!hasApprovedOrEditedUpdates || !validationRun || (!validationPassed && validationRun.status !== "Failed") || isPrCreating}>
                             {isPrCreating ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
                             Create Pull Request
                           </Button>
@@ -4790,15 +4797,47 @@ function RepositoryActivityPanel({
                       </div>
                       {validationRun ? (
                         <div className="mt-4 space-y-3">
-                          <div className="grid gap-3 md:grid-cols-4">
+                          <div className={`rounded-lg border p-3 text-sm ${
+                            validationPassed
+                              ? "border-success/30 bg-success/10 text-success"
+                              : "border-destructive/30 bg-destructive/10 text-destructive"
+                          }`}>
+                            {validationPassed
+                              ? "Validation passed. Approved Playwright updates are ready for pull request review."
+                              : "Validation completed with failures. Review the error details before creating a pull request."}
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-6">
                             <MiniStat label="Total" value={String(validationRun.totalTests)} />
                             <MiniStat label="Passed" value={String(validationRun.passed)} />
                             <MiniStat label="Failed" value={String(validationRun.failed)} />
                             <MiniStat label="Skipped" value={String(validationRun.skipped)} />
+                            <MiniStat label="Duration" value={`${Math.round(validationRun.duration / 1000)}s`} />
+                            <MiniStat label="Status" value={validationRun.status} />
                           </div>
+                          {validationRun.failedTestNames?.length ? (
+                            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
+                              <p className="text-sm font-semibold text-destructive">Failed Tests</p>
+                              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-destructive">
+                                {validationRun.failedTestNames.map((name) => <li key={name}>{name}</li>)}
+                              </ul>
+                            </div>
+                          ) : null}
                           {validationRun.errorDetails && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{validationRun.errorDetails}</p>}
                           {validationRun.failureExplanation && <p className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{validationRun.failureExplanation}</p>}
-                          <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.logs}</pre>
+                          <div className="grid gap-3 lg:grid-cols-2">
+                            <div>
+                              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">stdout</p>
+                              <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.stdout || validationRun.logs || "No stdout captured."}</pre>
+                            </div>
+                            <div>
+                              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">stderr</p>
+                              <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.stderr || "No stderr captured."}</pre>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Validation Summary Log</p>
+                            <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.logs}</pre>
+                          </div>
                           {validationRun.failed > 0 && (
                             <div className="space-y-2">
                               <Button variant="outline" size="sm" onClick={generateFixSuggestion}>Generate Fix Suggestion</Button>
@@ -4807,7 +4846,9 @@ function RepositoryActivityPanel({
                           )}
                         </div>
                       ) : (
-                        <p className="mt-3 text-sm text-muted-foreground">No validation result yet.</p>
+                        <div className="mt-3 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
+                          No validation run yet. Approve test updates and run validation.
+                        </div>
                       )}
                     </div>
                   </div>

@@ -512,6 +512,10 @@ export interface RepositoryValidationRun {
   browser: string;
   environment: string;
   logs: string;
+  stdout?: string;
+  stderr?: string;
+  failedTestNames?: string[];
+  validationWorkspacePath?: string;
   errorDetails?: string;
   failureExplanation?: string;
   screenshots: string[];
