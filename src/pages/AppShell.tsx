@@ -572,7 +572,7 @@ export default function AppShell() {
       role: response.role,
       permissions: response.permissions,
     });
-    setActiveView("generator");
+    setActiveView("dashboard");
   };
 
   const loadProductData = () => {
@@ -716,7 +716,7 @@ export default function AppShell() {
         onMobileOpenChange={setIsMobileNavOpen}
         auth={auth}
         onLogin={() => setActiveView("login")}
-        onProfile={() => setActiveView("profile")}
+        onProfile={() => setActiveView("settings-profile")}
         onLogout={async () => {
           try {
             await projectApi.logout();
@@ -784,24 +784,49 @@ export default function AppShell() {
             onModeChange={setActiveView}
             onAuthenticated={applyAuth}
           />
-        ) : activeView === "profile" ? (
+        ) : activeView === "dashboard" ? (
+          <DashboardHomePage
+            dashboard={dashboard}
+            workspaceUsage={workspaceUsage}
+            projects={projects}
+            reviewQueue={reviewQueue}
+            testRuns={testRuns}
+            onNavigate={setActiveView}
+          />
+        ) : activeView === "profile" || activeView === "settings-profile" ? (
           <ProfilePage
             auth={auth}
-            selectedWorkspaceId={selectedWorkspaceId || auth?.workspace?.id || ""}
-            aiProviderSettings={aiProviderSettings}
-            aiProviderUsage={aiProviderUsage}
-            isAIProviderLoading={isAIProviderLoading}
-            githubAutomationConfig={githubAutomationConfig}
-            repositoryAnalysis={repositoryAnalysis}
-            repositorySyncs={repositorySyncs}
+            onAuthChange={setAuth}
+          />
+        ) : activeView === "settings-ai-providers" ? (
+          <SettingsSection title="AI Providers" description="Configure default AI, Bring Your Own AI providers, feature model mapping, and usage logs.">
+            <AIProvidersSettings
+              workspaceId={selectedWorkspaceId || auth?.workspace?.id || ""}
+              role={auth.role}
+              settings={aiProviderSettings}
+              usage={aiProviderUsage}
+              isLoading={isAIProviderLoading}
+              onRefresh={() => refreshAIProviders(selectedWorkspaceId || auth?.workspace?.id || "")}
+            />
+          </SettingsSection>
+        ) : activeView === "repository-application" ||
+          activeView === "repository-automation" ||
+          activeView === "repository-activity" ||
+          activeView === "repository-impact" ||
+          activeView === "repository-playwright" ? (
+          <RepositoryIntelligencePage
+            activeView={activeView}
+            workspaceId={selectedWorkspaceId || auth?.workspace?.id || ""}
+            role={auth.role}
+            config={githubAutomationConfig}
+            analysis={repositoryAnalysis}
+            syncs={repositorySyncs}
             applicationRepositories={applicationRepositories}
             repositoryActivities={repositoryActivities}
-            isIntegrationLoading={isIntegrationLoading}
-            onAuthChange={setAuth}
-            onRefreshAIProviders={() => refreshAIProviders(selectedWorkspaceId || auth?.workspace?.id || "")}
-            onRefreshIntegrations={() => refreshIntegrations(selectedWorkspaceId || auth?.workspace?.id || "")}
+            isLoading={isIntegrationLoading}
+            onRefresh={() => refreshIntegrations(selectedWorkspaceId || auth?.workspace?.id || "")}
           />
-        ) : activeView === "pricing" ? (
+        ) : activeView === "pricing" || activeView === "settings-billing" ? (
           <PricingPage
             plans={plans}
             subscription={subscription}
@@ -824,6 +849,21 @@ export default function AppShell() {
               await refreshPricing(auth.workspace.id);
               toast.success(`Plan updated to ${updated.plan.name}`);
             }}
+          />
+        ) : activeView === "settings-workspace" ? (
+          <TeamWorkspacePage
+            workspaces={workspaces}
+            selectedWorkspaceId={selectedWorkspaceId}
+            detail={workspaceDetail}
+            projects={projects}
+            workspaceUsage={workspaceUsage}
+            isLoading={isWorkspaceLoading}
+            onSelectWorkspace={(workspaceId) => void refreshWorkspace(workspaceId)}
+            onRefresh={() => {
+              void refreshWorkspace(selectedWorkspaceId);
+              void refreshPricing(selectedWorkspaceId);
+            }}
+            onLimitExceeded={handleLimitExceeded}
           />
         ) : activeView === "generator" ? (
           <>
@@ -3361,34 +3401,10 @@ function AuthPage({
 
 function ProfilePage({
   auth,
-  selectedWorkspaceId,
-  aiProviderSettings,
-  aiProviderUsage,
-  isAIProviderLoading,
-  githubAutomationConfig,
-  repositoryAnalysis,
-  repositorySyncs,
-  applicationRepositories,
-  repositoryActivities,
-  isIntegrationLoading,
   onAuthChange,
-  onRefreshAIProviders,
-  onRefreshIntegrations,
 }: {
   auth: AuthContextResponse | null;
-  selectedWorkspaceId: string;
-  aiProviderSettings: AIProviderSettingsResponse | null;
-  aiProviderUsage: AIProviderUsageLog[];
-  isAIProviderLoading: boolean;
-  githubAutomationConfig: GitHubAutomationConfig | null;
-  repositoryAnalysis: RepositoryAnalysis | null;
-  repositorySyncs: RepositorySync[];
-  applicationRepositories: ApplicationRepositoryConfig[];
-  repositoryActivities: RepositoryActivity[];
-  isIntegrationLoading: boolean;
   onAuthChange: (auth: AuthContextResponse | null) => void;
-  onRefreshAIProviders: () => void;
-  onRefreshIntegrations: () => void;
 }) {
   const [fullName, setFullName] = useState(auth?.user.fullName ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -3400,14 +3416,12 @@ function ProfilePage({
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">Settings</Badge>
-        <h1 className="font-display text-3xl font-bold">Settings</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Manage account identity, workspace settings, security, and AI provider configuration.</p>
+        <h1 className="font-display text-3xl font-bold">Profile</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Manage account identity and password security.</p>
       </div>
       <Tabs defaultValue="account" className="space-y-5">
         <TabsList>
           <TabsTrigger value="account">Account</TabsTrigger>
-          <TabsTrigger value="ai-providers">AI Providers</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
         <TabsContent value="account" className="space-y-5">
@@ -3430,29 +3444,6 @@ function ProfilePage({
               </Button>
             </div>
           </Card>
-        </TabsContent>
-        <TabsContent value="ai-providers">
-          <AIProvidersSettings
-            workspaceId={selectedWorkspaceId}
-            role={auth.role}
-            settings={aiProviderSettings}
-            usage={aiProviderUsage}
-            isLoading={isAIProviderLoading}
-            onRefresh={onRefreshAIProviders}
-          />
-        </TabsContent>
-        <TabsContent value="integrations">
-          <AutomationRepositorySettings
-            workspaceId={selectedWorkspaceId}
-            role={auth.role}
-            config={githubAutomationConfig}
-            analysis={repositoryAnalysis}
-            syncs={repositorySyncs}
-            applicationRepositories={applicationRepositories}
-            repositoryActivities={repositoryActivities}
-            isLoading={isIntegrationLoading}
-            onRefresh={onRefreshIntegrations}
-          />
         </TabsContent>
         <TabsContent value="security">
           {auth.user.authProvider === "email" && (
@@ -3509,7 +3500,62 @@ const aiFeatureLabels: Record<AIProviderFeatureName, string> = {
   "repository-fix-suggestion": "Repository Fix Suggestion",
 };
 
-function AutomationRepositorySettings({
+type RepositoryIntelligenceTab = "automation" | "application" | "activity";
+
+const repositoryIntelligenceMeta: Record<
+  "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright",
+  { title: string; description: string; tab: RepositoryIntelligenceTab }
+> = {
+  "repository-application": {
+    title: "Application Repositories",
+    description: "Connect frontend and backend repositories, register webhooks, and capture code-change activity.",
+    tab: "application",
+  },
+  "repository-automation": {
+    title: "Automation Repository",
+    description: "Configure the GitHub Playwright automation repository used for generated specs, validation, and pull requests.",
+    tab: "automation",
+  },
+  "repository-activity": {
+    title: "Repository Activity",
+    description: "Review GitHub push and pull request events from connected application repositories.",
+    tab: "activity",
+  },
+  "repository-impact": {
+    title: "AI Impact Analysis",
+    description: "Open repository activity events to map changed files to impacted modules, tests, and recommendations.",
+    tab: "activity",
+  },
+  "repository-playwright": {
+    title: "Playwright Update Workflow",
+    description: "Generate updates, review diffs, run validation, get AI recommendations, and create pull requests.",
+    tab: "activity",
+  },
+};
+
+function SettingsSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div>
+        <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">Settings</Badge>
+        <h1 className="font-display text-3xl font-bold">{title}</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function RepositoryIntelligencePage({
+  activeView,
   workspaceId,
   role,
   config,
@@ -3520,6 +3566,7 @@ function AutomationRepositorySettings({
   isLoading,
   onRefresh,
 }: {
+  activeView: "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright";
   workspaceId: string;
   role: WorkspaceRole;
   config: GitHubAutomationConfig | null;
@@ -3528,6 +3575,59 @@ function AutomationRepositorySettings({
   applicationRepositories: ApplicationRepositoryConfig[];
   repositoryActivities: RepositoryActivity[];
   isLoading: boolean;
+  onRefresh: () => void;
+}) {
+  const meta = repositoryIntelligenceMeta[activeView];
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">
+            <GitBranch className="mr-1 size-3.5" />
+            Repository Intelligence
+          </Badge>
+          <h1 className="font-display text-3xl font-bold">{meta.title}</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{meta.description}</p>
+        </div>
+      </div>
+      <AutomationRepositorySettings
+        workspaceId={workspaceId}
+        role={role}
+        config={config}
+        analysis={analysis}
+        syncs={syncs}
+        applicationRepositories={applicationRepositories}
+        repositoryActivities={repositoryActivities}
+        isLoading={isLoading}
+        initialTab={meta.tab}
+        onRefresh={onRefresh}
+      />
+    </div>
+  );
+}
+
+function AutomationRepositorySettings({
+  workspaceId,
+  role,
+  config,
+  analysis,
+  syncs,
+  applicationRepositories,
+  repositoryActivities,
+  isLoading,
+  initialTab = "automation",
+  onRefresh,
+}: {
+  workspaceId: string;
+  role: WorkspaceRole;
+  config: GitHubAutomationConfig | null;
+  analysis: RepositoryAnalysis | null;
+  syncs: RepositorySync[];
+  applicationRepositories: ApplicationRepositoryConfig[];
+  repositoryActivities: RepositoryActivity[];
+  isLoading: boolean;
+  initialTab?: RepositoryIntelligenceTab;
   onRefresh: () => void;
 }) {
   const canManage = role === "Owner" || role === "Admin";
@@ -3548,6 +3648,7 @@ function AutomationRepositorySettings({
   const [isCreatingSyncPr, setIsCreatingSyncPr] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isOverrideOpen, setIsOverrideOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<RepositoryIntelligenceTab>(initialTab);
   const [overrideForm, setOverrideForm] = useState({
     language: analysis?.language ?? "TypeScript",
     framework: analysis?.framework ?? "Playwright Test Runner",
@@ -3560,6 +3661,10 @@ function AutomationRepositorySettings({
     usesPageObjectModel: analysis?.usesPageObjectModel ?? false,
     usesFixtures: analysis?.usesFixtures ?? false,
   });
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     setForm((current) => ({
@@ -3736,7 +3841,7 @@ function AutomationRepositorySettings({
         : "border-success/40 bg-success/10 text-success";
 
   return (
-    <Tabs defaultValue="automation" className="space-y-5">
+    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RepositoryIntelligenceTab)} className="space-y-5">
       <TabsList className="h-auto flex-wrap justify-start">
         <TabsTrigger value="automation">Automation Repository</TabsTrigger>
         <TabsTrigger value="application">Application Repositories</TabsTrigger>
@@ -4367,6 +4472,7 @@ function RepositoryActivityPanel({
   const approvedOrEditedUpdates = testUpdates.filter((update) => update.status === "Approved" || update.status === "Edited");
   const hasApprovedOrEditedUpdates = approvedOrEditedUpdates.length > 0;
   const validationPassed = validationRun?.status === "Passed" && validationRun.failed === 0;
+  const validationInProgress = isValidationRunning || validationRun?.status === "Running" || validationRun?.status === "Pending";
   const recommendationBlocksPr = validationRecommendation?.releaseRecommendation === "Do Not Merge";
   const recommendationWarnsPr = validationRecommendation?.releaseRecommendation === "Merge with Caution";
 
@@ -4472,12 +4578,29 @@ function RepositoryActivityPanel({
 
   const runValidation = async () => {
     if (!impactAnalysis) return;
+    const isTerminalStatus = (status: RepositoryValidationRun["status"]) =>
+      !["Pending", "Running"].includes(status);
+
     try {
       setIsValidationRunning(true);
-      const run = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id);
-      setValidationRun(run);
+      const startedRun = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id);
+      setValidationRun(startedRun);
       setValidationRecommendation(null);
-      toast.success(run.status === "Failed" ? "Validation completed with failures" : "Validation passed");
+      toast.success("Validation started. Results will appear here automatically.");
+
+      let latestRun = startedRun;
+      for (let attempt = 0; attempt < 80 && !isTerminalStatus(latestRun.status); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        latestRun = await projectApi.getRepositoryUpdateValidation(impactAnalysis.id);
+        setValidationRun(latestRun);
+      }
+
+      if (!isTerminalStatus(latestRun.status)) {
+        toast.warning("Validation is still running. You can stay on this page; results will be available shortly.");
+        return;
+      }
+
+      toast.success(latestRun.status === "Failed" ? "Validation completed with failures" : "Validation completed");
       void loadValidationRecommendation(impactAnalysis.id, false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Validation failed");
@@ -4765,8 +4888,8 @@ function RepositoryActivityPanel({
                             <Eye className="size-4" />
                             View PR Preview
                           </Button>
-                          <Button variant="outline" onClick={runValidation} disabled={!hasApprovedOrEditedUpdates || isValidationRunning}>
-                            {isValidationRunning ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                          <Button variant="outline" onClick={runValidation} disabled={!hasApprovedOrEditedUpdates || validationInProgress}>
+                            {validationInProgress ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
                             Run Validation
                           </Button>
                           <Button onClick={createImpactPr} disabled={!hasApprovedOrEditedUpdates || !validationRun || (!validationPassed && validationRun.status !== "Failed") || isPrCreating}>
@@ -4827,14 +4950,19 @@ function RepositoryActivityPanel({
                       </div>
                       {validationRun ? (
                         <div className="mt-4 space-y-3">
-                          <div className={`rounded-lg border p-3 text-sm ${
-                            validationPassed
-                              ? "border-success/30 bg-success/10 text-success"
-                              : "border-destructive/30 bg-destructive/10 text-destructive"
-                          }`}>
-                            {validationPassed
-                              ? "Validation passed. Approved Playwright updates are ready for pull request review."
-                              : "Validation completed with failures. Review the error details before creating a pull request."}
+                          <div className={cn(
+                            "rounded-lg border p-3 text-sm",
+                            validationInProgress
+                              ? "border-primary/30 bg-primary/10 text-primary"
+                              : validationPassed
+                                ? "border-success/30 bg-success/10 text-success"
+                                : "border-destructive/30 bg-destructive/10 text-destructive",
+                          )}>
+                            {validationInProgress
+                              ? "Validation is running. AI QA Copilot is preparing the automation repository, applying approved updates, and executing Playwright tests."
+                              : validationPassed
+                                ? "Validation passed. Approved Playwright updates are ready for pull request review."
+                                : "Validation completed with failures. Review the error details before creating a pull request."}
                           </div>
                           <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
                             <MiniStat label="Status" value={validationRun.status} />
@@ -4846,10 +4974,25 @@ function RepositoryActivityPanel({
                             <MiniStat label="Browser" value={validationRun.browser || "-"} />
                             <MiniStat label="Environment" value={validationRun.environment || "-"} />
                           </div>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <MiniStat label="Validation Provider" value={validationRun.validationProvider === "github-actions" ? "GitHub Actions" : validationRun.validationProvider === "backend-fallback" ? "Backend fallback" : "-"} />
+                            <MiniStat label="Validation Branch" value={validationRun.validationBranchName || "-"} />
+                            <MiniStat label="Workflow Conclusion" value={validationRun.workflowConclusion || "-"} />
+                          </div>
                           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/40 bg-card/70 p-3 text-sm">
                             <span className="font-semibold">Command:</span>
                             <code className="break-all rounded bg-slate-950 px-2 py-1 text-xs text-slate-100">{validationRun.command || "npx playwright test --reporter=json,html --workers=1"}</code>
-                            {validationRun.reportUrl ? (
+                            {validationRun.workflowRunUrl ? (
+                              <a
+                                className="ml-auto inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                                href={validationRun.workflowRunUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <ExternalLink className="size-4" />
+                                View GitHub Actions Run
+                              </a>
+                            ) : validationRun.reportUrl ? (
                               <a
                                 className="ml-auto inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
                                 href={validationRun.reportUrl}
@@ -8841,7 +8984,7 @@ function Results({
                           </>
                         ) : (
                           <div className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
-                            Please configure GitHub repository integration first in Settings → Integrations → Automation Repository.
+                            Please configure GitHub repository integration first in Repository Intelligence → Automation Repository.
                           </div>
                         )}
                       </div>

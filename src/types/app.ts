@@ -2,11 +2,16 @@ export type Theme = "light" | "dark";
 
 export type ActiveView =
   | "landing"
+  | "dashboard"
   | "login"
   | "signup"
   | "forgot-password"
   | "reset-password"
   | "profile"
+  | "settings-profile"
+  | "settings-ai-providers"
+  | "settings-workspace"
+  | "settings-billing"
   | "pricing"
   | "generator"
   | "projects"
@@ -14,5 +19,10 @@ export type ActiveView =
   | "review"
   | "execution"
   | "chat"
+  | "repository-application"
+  | "repository-automation"
+  | "repository-activity"
+  | "repository-impact"
+  | "repository-playwright"
   | "workspace"
   | "analytics";
