@@ -6092,50 +6092,32 @@ function LandingPage({
       icon: ClipboardCheck,
     },
     {
-      title: "GitHub Automation Repository Integration",
-      description: "Connect automation repositories, create feature branches, add Playwright files, and raise pull requests.",
+      title: "Automation Repository Onboarding",
+      description: "Connect, scan, initialize, and prepare Playwright repositories for AI-powered validation.",
       icon: Github,
       enterprise: true,
     },
     {
-      title: "Application Repository Monitoring",
-      description: "Connect frontend or backend repositories, receive GitHub webhook events, and track changed files.",
+      title: "Repository Change Intelligence",
+      description: "Monitor application repositories, capture changed files, map impacted tests, and suggest QA actions.",
       icon: GitBranch,
       enterprise: true,
     },
     {
-      title: "Smart Repository Analysis",
-      description: "Detect Playwright framework, language, folder structure, Page Object Model usage, and coding conventions.",
-      icon: Search,
-      enterprise: true,
-    },
-    {
-      title: "AI Impact Analysis",
-      description: "Analyze repository changes, identify impacted modules, and generate QA and automation recommendations.",
-      icon: SearchCheck,
-      enterprise: true,
-    },
-    {
-      title: "Test Mapping",
-      description: "Map changed application files to related Playwright tests using repository patterns and AI assistance.",
-      icon: GitCompare,
-      enterprise: true,
-    },
-    {
-      title: "Playwright Update Generation",
-      description: "Generate proposed updates for impacted Playwright tests with old-versus-new code review.",
-      icon: Code2,
+      title: "Playwright Update Workflow",
+      description: "Generate proposed test updates, review diffs, approve changes, and prepare pull requests.",
+      icon: GitPullRequest,
       enterprise: true,
     },
     {
       title: "Real Playwright Validation",
-      description: "Run approved AI-generated Playwright updates in an isolated validation workspace and view pass, fail, skipped, logs, reports, and AI failure explanations before creating a pull request.",
+      description: "Validate approved updates with GitHub Actions and review pass, fail, skipped, logs, and reports.",
       icon: ShieldCheck,
       enterprise: true,
     },
     {
       title: "AI Validation Recommendation",
-      description: "AI analyzes validation results and provides confidence score, risk level, merge recommendation, reasons, and recommended QA actions before pull request creation.",
+      description: "Get confidence, risk, merge guidance, reasons, and QA actions after validation completes.",
       icon: Brain,
       enterprise: true,
     },
@@ -6164,23 +6146,23 @@ function LandingPage({
   ];
   const whyChoose = [
     {
-      title: "Faster Test Design",
-      description: "Reduce repetitive QA documentation effort and help teams move from requirements to test coverage faster.",
+      title: "Less Manual QA Effort",
+      description: "Reduce repetitive test design, review preparation, execution tracking, and automation maintenance work.",
       icon: Rocket,
     },
     {
-      title: "Better Test Coverage",
-      description: "Expose missing scenarios earlier so teams can improve confidence before development and release gates.",
+      title: "Safer Automation Changes",
+      description: "Analyze repository changes, validate generated Playwright updates, and keep PRs review-ready.",
       icon: Gauge,
     },
     {
       title: "End-to-End QA Governance",
-      description: "Bring generation, review, approval, versioning, execution, and reporting into one controlled flow.",
+      description: "Bring generation, review, approval, execution, validation, and reporting into one controlled flow.",
       icon: ShieldCheck,
     },
     {
-      title: "Manual + Automation Ready",
-      description: "Support today’s manual execution needs while preparing teams for Playwright automation workflows.",
+      title: "Higher Release Confidence",
+      description: "Use coverage, execution, validation, and AI recommendations to make release decisions clearer.",
       icon: ClipboardCheck,
     },
     {
@@ -6221,7 +6203,7 @@ function LandingPage({
     },
     {
       title: "Run Real Validation",
-      description: "Execute approved updates in isolation",
+      description: "Run approved updates through GitHub Actions",
     },
     {
       title: "AI Recommendation",
@@ -6242,14 +6224,6 @@ function LandingPage({
     { title: "Bitbucket Repository", description: "Connect automation repos and branch workflows.", icon: GitCompare, status: "Coming Soon" },
     { title: "Azure DevOps", description: "Enterprise delivery workflow support.", icon: Boxes, status: "Future" },
     { title: "CI/CD Pipeline", description: "Automation execution and release pipeline signals.", icon: TrendingUp, status: "Future" },
-  ];
-  const businessValue = [
-    "Reduce manual test design effort",
-    "Detect impacted tests from repository changes",
-    "Keep Playwright automation aligned with application updates",
-    "Validate generated tests before creating pull requests",
-    "Improve release confidence",
-    "Give managers clear quality visibility",
   ];
   const aiProviderCards = [
     {
@@ -6284,59 +6258,15 @@ function LandingPage({
       icon: ShieldCheck,
     },
   ];
-  const repositoryIntelligence = [
-    {
-      title: "Detect Framework",
-      description: "Detect Playwright setup from config files and dependencies.",
-      icon: Search,
-    },
-    {
-      title: "Detect Language",
-      description: "Identify JavaScript, TypeScript, or Java automation projects.",
-      icon: Code2,
-    },
-    {
-      title: "Detect Project Pattern",
-      description: "Understand folder structure, naming conventions, fixtures, and Page Object Model usage.",
-      icon: FolderKanban,
-    },
-    {
-      title: "Generate Matching Tests",
-      description: "Create Playwright tests that follow the existing repository style.",
-      icon: GitPullRequest,
-    },
-  ];
-  const repositorySyncBenefits = [
-    {
-      title: "Detect Code Changes",
-      description: "Automatically detect changed modules, pages, APIs, and UI components.",
-      icon: RefreshCw,
-    },
-    {
-      title: "Identify Impacted Tests",
-      description: "Find Playwright tests that may be affected by recent application changes.",
-      icon: Search,
-    },
-    {
-      title: "AI Update Suggestions",
-      description: "Generate intelligent recommendations to update existing automation tests.",
-      icon: Sparkles,
-    },
-    {
-      title: "Create Pull Requests",
-      description: "Create feature branches and Pull Requests for QA team review before merging.",
-      icon: GitMerge,
-    },
-  ];
   const faqs = [
     ["What is AI QA Copilot?", "AI QA Copilot is an AI-Powered Quality Engineering Platform for requirement analysis, test generation, review, execution, repository intelligence, Playwright validation, and QA reporting."],
+    ["How does Automation Repository Onboarding help?", "It scans connected Playwright repositories, checks compatibility, initializes missing setup files safely, and prepares GitHub Actions validation."],
     ["Can AI QA Copilot detect frontend repository changes?", "Yes. It can connect application repositories, receive GitHub webhook events, and track changed files for impact analysis."],
     ["Can it update Playwright tests automatically?", "It can generate proposed Playwright updates for impacted tests, but users review and approve changes before validation and pull request creation."],
-    ["Does it run generated Playwright tests before creating a PR?", "Yes. Approved updates can be validated in an isolated workspace, and the result includes pass/fail/skipped counts, logs, reports, and AI recommendations."],
+    ["Does it run generated Playwright tests before creating a PR?", "Yes. Approved updates can be validated through GitHub Actions, and the result includes pass/fail/skipped counts, logs, reports, and AI recommendations."],
     ["Can users choose their own AI provider?", "Yes. AI QA Copilot supports default AI and Bring Your Own AI providers such as OpenAI, Claude, Gemini, Groq, Azure OpenAI, OpenRouter, and custom providers."],
-    ["Can teams collaborate?", "Yes. Workspaces, roles, project access, review queues, and shared analytics support team-based QA work."],
     ["Does it support manual execution?", "Yes. Teams can create test runs, execute approved test cases, and track Passed, Failed, Blocked, Skipped, and Not Executed status."],
-    ["Will it support Jira/GitHub/Bitbucket?", "GitHub automation workflows are part of the v1 platform. Jira and Bitbucket are planned enterprise capabilities for traceability and repository workflows."],
+    ["Can teams collaborate?", "Yes. Workspaces, roles, project access, review queues, and shared analytics support team-based QA work."],
     ["Is it suitable for enterprise QA teams?", "Yes. The product is designed around governed workflows, role-based access, approval controls, analytics, and scalable QA asset management."],
   ];
   const onboardingWorkflow = [
@@ -6545,14 +6475,6 @@ function LandingPage({
                   <div className="p-3 text-destructive">❌ Manual Setup Required</div>
                 </div>
               </div>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button onClick={onStart}>
-                  <Github className="size-4" />
-                  Connect Repository
-                </Button>
-                <Button variant="outline" onClick={onBookDemo}>Book Demo</Button>
-                <Button variant="ghost" onClick={() => window.open("https://github.com/dksable/ai-qa-copilot-fe/tree/main/docs", "_blank", "noopener,noreferrer")}>View Documentation</Button>
-              </div>
             </div>
           </div>
         </div>
@@ -6615,71 +6537,6 @@ function LandingPage({
       </LandingSection>
 
       <LandingSection
-        eyebrow="Repository Intelligence"
-        title="Repository Intelligence for Automation Teams"
-        description="AI QA Copilot understands your existing automation framework before generating new test files."
-      >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {repositoryIntelligence.map(({ title, description, icon: Icon }) => (
-            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5">
-              <div className="mb-4 flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
-                <Icon className="size-5" />
-              </div>
-              <h3 className="font-semibold">{title}</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-5 rounded-lg border border-primary/30 bg-primary/10 p-5">
-          <p className="max-w-5xl text-sm leading-6 text-muted-foreground">
-            <span className="font-semibold text-foreground">Smart Repository Analysis</span> helps automation teams avoid generic generated code. AI QA Copilot adapts to the existing test framework, language, and coding standards, making generated Playwright tests easier to review, maintain, and merge.
-          </p>
-        </div>
-      </LandingSection>
-
-      <LandingSection
-        eyebrow="Repository Sync Beta"
-        title="Keep Your Automation Suite Always Up-to-Date"
-        description="AI QA Copilot continuously monitors repository changes and helps automation teams keep Playwright tests synchronized with the latest application updates."
-      >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {repositorySyncBenefits.map(({ title, description, icon: Icon }) => (
-            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5">
-              <div className="mb-4 flex size-10 items-center justify-center rounded-md bg-warning/10 text-warning">
-                <Icon className="size-5" />
-              </div>
-              <h3 className="font-semibold">{title}</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-5 rounded-lg border border-warning/30 bg-warning/10 p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">Beta</Badge>
-            <h3 className="font-semibold">AI Repository Sync</h3>
-          </div>
-          <p className="max-w-5xl text-sm leading-6 text-muted-foreground">
-            Reduce manual automation maintenance by automatically detecting application changes, identifying impacted Playwright tests, and generating AI-assisted update suggestions before creating Pull Requests.
-          </p>
-          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {[
-              "Reduce automation maintenance effort",
-              "Detect impacted tests automatically",
-              "Improve regression test reliability",
-              "Accelerate QA review cycles",
-              "Minimize flaky and outdated tests",
-              "Keep automation repositories synchronized",
-            ].map((benefit) => (
-              <div key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
-                <CheckCircle2 className="size-4 text-success" />
-                {benefit}
-              </div>
-            ))}
-          </div>
-        </div>
-      </LandingSection>
-
-      <LandingSection
         eyebrow="AI Providers / BYOAI"
         title="Choose Your AI. No Vendor Lock-In."
         description="Use AI QA Copilot’s built-in AI or connect your organization’s preferred AI provider for test generation, AI chat, impact analysis, and Playwright automation."
@@ -6714,7 +6571,7 @@ function LandingPage({
       </LandingSection>
 
       <LandingSection
-        eyebrow="Why Choose AI QA Copilot"
+        eyebrow="Business Outcomes"
         title="Built for QA Leaders, Engineering Managers, and Delivery Teams"
         description="Move from isolated test documents to governed quality operations with clear ownership, stronger confidence, and management-ready visibility."
       >
@@ -6767,21 +6624,6 @@ function LandingPage({
               </div>
               <h3 className="text-sm font-semibold">{title}</h3>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
-            </div>
-          ))}
-        </div>
-      </LandingSection>
-
-      <LandingSection
-        eyebrow="Business Value"
-        title="Turn QA Effort Into Measurable Delivery Confidence"
-        description="Give leaders a clearer view of quality readiness while helping teams reduce repetitive work and improve release decisions."
-      >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {businessValue.map((value) => (
-            <div key={value} className="flex items-start gap-3 rounded-lg border border-border/40 bg-card/60 p-5">
-              <TrendingUp className="mt-0.5 size-5 shrink-0 text-success" />
-              <p className="font-semibold">{value}</p>
             </div>
           ))}
         </div>
