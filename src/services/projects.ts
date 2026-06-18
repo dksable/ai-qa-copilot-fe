@@ -704,6 +704,18 @@ export interface RepositoryAnalysis {
   importStyle: string;
   pattern: RepositoryAnalysisPattern;
   confidenceScore: number;
+  playwrightVersion?: string;
+  packageManager?: string;
+  githubActionsCompatible?: boolean;
+  onboardingStatus?: "Ready" | "Needs Initialization" | "Needs Review";
+  readinessScore?: number;
+  missingFiles?: string[];
+  recommendedActions?: string[];
+  healthChecks?: Array<{
+    name: string;
+    status: "Passed" | "Failed" | "Warning";
+    message: string;
+  }>;
   scannedFiles: string[];
   createdBy: string;
   createdAt: string;
@@ -1805,6 +1817,16 @@ export const projectApi = {
     ),
   analyzeGitHubRepository: (workspaceId: string) =>
     apiRequest<RepositoryAnalysis>("/api/integrations/github/analyze-repository", {
+      method: "POST",
+      body: JSON.stringify({ workspaceId }),
+    }),
+  initializeAutomationRepositoryOnboarding: (workspaceId: string) =>
+    apiRequest<{
+      message: string;
+      branchName: string | null;
+      files: string[];
+      pullRequest: { html_url: string; number: number; title: string } | null;
+    }>("/api/integrations/github/automation-onboarding/initialize", {
       method: "POST",
       body: JSON.stringify({ workspaceId }),
     }),

@@ -3840,6 +3840,7 @@ function AutomationRepositorySettings({
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isInitializingOnboarding, setIsInitializingOnboarding] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [activeSyncId, setActiveSyncId] = useState("");
   const [isGeneratingSyncSuggestions, setIsGeneratingSyncSuggestions] = useState(false);
@@ -3946,6 +3947,31 @@ function AutomationRepositorySettings({
     }
   };
 
+  const initializeAutomationRepositoryOnboarding = async () => {
+    if (!workspaceId) return;
+    try {
+      setIsInitializingOnboarding(true);
+      const result = await projectApi.initializeAutomationRepositoryOnboarding(workspaceId);
+      if (result.pullRequest) {
+        toast.success(
+          <span>
+            Automation Repository Onboarding PR created:{" "}
+            <a className="font-semibold underline" href={result.pullRequest.html_url} target="_blank" rel="noreferrer">
+              View PR
+            </a>
+          </span>,
+        );
+      } else {
+        toast.success(result.message);
+      }
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Automation Repository Onboarding failed");
+    } finally {
+      setIsInitializingOnboarding(false);
+    }
+  };
+
   const saveOverride = async () => {
     try {
       await projectApi.overrideGitHubRepositoryAnalysis({
@@ -3964,7 +3990,7 @@ function AutomationRepositorySettings({
   const syncRepository = async () => {
     if (!workspaceId) return;
     if (!analysis) {
-      toast.error("Run Smart Repository Analysis before syncing repository changes.");
+      toast.error("Run Automation Repository Onboarding analysis before syncing repository changes.");
       return;
     }
     try {
@@ -4050,10 +4076,10 @@ function AutomationRepositorySettings({
       <Card className="app-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">Automation Repository</Badge>
-            <h2 className="font-display text-2xl font-semibold">GitHub Automation Repository</h2>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">Automation Repository Onboarding</Badge>
+            <h2 className="font-display text-2xl font-semibold">Automation Repository Onboarding</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Connect a GitHub automation repository so AI QA Copilot can create a feature branch, add generated Playwright specs, and raise a pull request for review.
+              Connect, analyze, initialize, and validate any GitHub Playwright automation repository with AI. AI QA Copilot detects framework readiness, prepares missing Playwright setup, configures GitHub Actions validation, and keeps all changes inside reviewable pull requests.
             </p>
           </div>
           {config ? (
@@ -4101,7 +4127,7 @@ function AutomationRepositorySettings({
             <div className="flex flex-wrap gap-2">
               <Button onClick={saveConfig} disabled={!canManage || isSaving || !form.token || !form.owner || !form.repo}>
                 {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />}
-                Save GitHub Config
+                Save Repository Config
               </Button>
               <Button variant="outline" onClick={testConnection} disabled={!config || isTesting}>
                 {isTesting ? <Loader2 className="size-4 animate-spin" /> : <GitBranch className="size-4" />}
@@ -4109,7 +4135,7 @@ function AutomationRepositorySettings({
               </Button>
               <Button variant="outline" onClick={analyzeRepository} disabled={!config || isAnalyzing}>
                 {isAnalyzing ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                Analyze Repository
+                Analyze Onboarding Readiness
               </Button>
             </div>
           </div>
@@ -4126,10 +4152,10 @@ function AutomationRepositorySettings({
                 <p><span className="text-muted-foreground">Token:</span> {config.tokenMasked}</p>
               </div>
             ) : (
-              <p className="text-sm leading-6 text-muted-foreground">Please configure GitHub repository integration first.</p>
+              <p className="text-sm leading-6 text-muted-foreground">Please configure an automation repository first.</p>
             )}
             <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">
-              Tokens are encrypted in the backend and never displayed after saving. AI QA Copilot always creates a branch and pull request; it never pushes directly to the default branch.
+              Tokens are encrypted in the backend and never displayed after saving. Automation Repository Onboarding always creates a branch and pull request; it never pushes directly to the default branch.
             </div>
           </div>
         </div>
@@ -4138,9 +4164,9 @@ function AutomationRepositorySettings({
       <Card className="app-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="font-display text-xl font-semibold">Detected Repository Setup</h3>
+            <h3 className="font-display text-xl font-semibold">Automation Repository Onboarding Report</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              AI QA Copilot uses this analysis to choose the target folder and describe the generated Pull Request.
+              AI QA Copilot scans the repository, checks Playwright readiness, validates GitHub Actions compatibility, and recommends initialization steps.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -4161,7 +4187,7 @@ function AutomationRepositorySettings({
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Override Repository Analysis</DialogTitle>
+                  <DialogTitle>Override Automation Repository Onboarding Analysis</DialogTitle>
                 </DialogHeader>
                 <div className="grid gap-3">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -4198,10 +4224,62 @@ function AutomationRepositorySettings({
 
         {!analysis ? (
           <p className="mt-5 rounded-lg border border-dashed border-border/50 p-6 text-center text-sm text-muted-foreground">
-            No repository analysis yet. Connect GitHub and click Analyze Repository.
+            No onboarding analysis yet. Connect GitHub and click Analyze Onboarding Readiness.
           </p>
         ) : (
           <div className="mt-5 space-y-4">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-display text-lg font-semibold">Automation Repository Onboarding Health</h4>
+                    <Badge
+                      variant="outline"
+                      className={analysis.onboardingStatus === "Ready" ? "border-success/40 bg-success/10 text-success" : analysis.onboardingStatus === "Needs Initialization" ? "border-warning/40 bg-warning/10 text-warning" : "border-destructive/40 bg-destructive/10 text-destructive"}
+                    >
+                      {analysis.onboardingStatus || "Needs Review"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {analysis.githubActionsCompatible
+                      ? "GitHub Actions validation workflow is compatible with AI QA Copilot."
+                      : "GitHub Actions validation workflow is missing or needs initialization."}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                    {analysis.readinessScore ?? analysis.confidenceScore}% readiness
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    onClick={initializeAutomationRepositoryOnboarding}
+                    disabled={!canManage || isInitializingOnboarding || analysis.onboardingStatus === "Ready"}
+                  >
+                    {isInitializingOnboarding ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
+                    Initialize Missing Files
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <MiniStat label="Playwright Version" value={analysis.playwrightVersion || "Unknown"} />
+                <MiniStat label="Package Manager" value={analysis.packageManager || analysis.buildTool || "Unknown"} />
+                <MiniStat label="GitHub Actions" value={analysis.githubActionsCompatible ? "Ready" : "Missing"} />
+                <MiniStat label="Missing Files" value={String(analysis.missingFiles?.length ?? 0)} />
+              </div>
+              {analysis.missingFiles?.length ? (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Missing initialization files</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {analysis.missingFiles.map((file) => <Badge key={file} variant="outline" className="font-mono text-[11px]">{file}</Badge>)}
+                  </div>
+                </div>
+              ) : null}
+              {analysis.recommendedActions?.length ? (
+                <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                  {analysis.recommendedActions.map((action) => <li key={action}>{action}</li>)}
+                </ul>
+              ) : null}
+            </div>
             {analysis.confidenceScore < 70 && (
               <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
                 Confidence is low. Please review the detected language, folder, and pattern before pushing generated tests.
@@ -4217,6 +4295,24 @@ function AutomationRepositorySettings({
               <MiniStat label="POM" value={analysis.usesPageObjectModel ? "Yes" : "No"} />
               <MiniStat label="Fixtures" value={analysis.usesFixtures ? "Yes" : "No"} />
             </div>
+            {analysis.healthChecks?.length ? (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {analysis.healthChecks.map((check) => (
+                  <div key={check.name} className="rounded-lg border border-border/40 bg-card/70 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold">{check.name}</p>
+                      <Badge
+                        variant="outline"
+                        className={check.status === "Passed" ? "border-success/40 bg-success/10 text-success" : check.status === "Warning" ? "border-warning/40 bg-warning/10 text-warning" : "border-destructive/40 bg-destructive/10 text-destructive"}
+                      >
+                        {check.status}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">{check.message}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="rounded-lg border border-border/40 bg-surface/40 p-4">
               <h4 className="text-sm font-semibold">Scanned Files</h4>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -6205,6 +6301,48 @@ function LandingPage({
     ["Will it support Jira/GitHub/Bitbucket?", "GitHub automation workflows are part of the v1 platform. Jira and Bitbucket are planned enterprise capabilities for traceability and repository workflows."],
     ["Is it suitable for enterprise QA teams?", "Yes. The product is designed around governed workflows, role-based access, approval controls, analytics, and scalable QA asset management."],
   ];
+  const onboardingWorkflow = [
+    { title: "Connect Repository", icon: Github },
+    { title: "Repository Scan", icon: Search },
+    { title: "Compatibility Analysis", icon: ShieldCheck },
+    { title: "Framework Detection", icon: Code2 },
+    { title: "Initialize Missing Files", icon: FileText },
+    { title: "GitHub Actions Configuration", icon: GitBranch },
+    { title: "Validation Ready", icon: CheckCircle2 },
+    { title: "Run AI Validation", icon: Sparkles },
+  ];
+  const onboardingCapabilities = [
+    {
+      title: "Smart Repository Scan",
+      description: "Automatically analyzes repository structure, dependencies, Playwright configuration, and framework readiness.",
+      icon: Search,
+    },
+    {
+      title: "Framework Detection",
+      description: "Detects Playwright, version, package manager, repository structure, and stays future-ready for Cypress, Selenium, and WebdriverIO.",
+      icon: Code2,
+    },
+    {
+      title: "Compatibility Checker",
+      description: "Checks package.json, Playwright config, GitHub Actions workflow, tests folder, dependencies, and displays a Repository Health Score.",
+      icon: Gauge,
+    },
+    {
+      title: "One-Click Initialization",
+      description: "Creates missing workflow, Playwright config, .env example, README guidance, and sample smoke test without overwriting existing files.",
+      icon: Rocket,
+    },
+    {
+      title: "GitHub Actions Ready",
+      description: "Prepares repository validation using GitHub Actions so teams do not need manual CI setup for AI QA Copilot validation.",
+      icon: Github,
+    },
+    {
+      title: "Validation Ready",
+      description: "After onboarding, teams can generate Playwright updates, run validation, review results, and create Pull Requests.",
+      icon: ShieldCheck,
+    },
+  ];
 
   return (
     <div className="space-y-20 pb-10">
@@ -6250,6 +6388,137 @@ function LandingPage({
         </div>
         <LandingProductMockup />
       </section>
+
+      <LandingSection
+        eyebrow="⭐ Enterprise Feature"
+        title="Automation Repository Onboarding"
+        description="Connect Any Playwright Automation Repository in Minutes"
+      >
+        <div className="overflow-hidden rounded-2xl border border-primary/20 bg-card/75 p-5 shadow-card md:p-7">
+          <div className="grid gap-8 xl:grid-cols-[1fr_.42fr]">
+            <div>
+              <div className="max-w-4xl">
+                <p className="text-base leading-7 text-muted-foreground">
+                  AI QA Copilot automatically scans, analyzes, initializes, and prepares your Playwright automation repository for AI-powered validation.
+                </p>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  Instead of manually configuring workflows, dependencies, and validation pipelines, users simply connect a GitHub repository and AI QA Copilot handles the rest.
+                </p>
+              </div>
+
+              <div className="mt-7 grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+                {onboardingWorkflow.map(({ title, icon: Icon }, index) => (
+                  <div key={title} className="relative rounded-xl border border-border/40 bg-surface/50 p-3 text-center">
+                    <span className="mx-auto flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Icon className="size-5" />
+                    </span>
+                    <p className="mt-3 text-xs font-semibold leading-5">{title}</p>
+                    {index < onboardingWorkflow.length - 1 && (
+                      <span className="absolute -right-2 top-1/2 hidden size-4 -translate-y-1/2 rounded-full border border-primary/30 bg-background text-primary xl:flex xl:items-center xl:justify-center">
+                        <span className="size-1.5 animate-pulse rounded-full bg-primary" />
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {onboardingCapabilities.map(({ title, description, icon: Icon }) => (
+                  <div key={title} className="rounded-xl border border-border/40 bg-card/70 p-5 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-card">
+                    <span className="mb-4 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Icon className="size-5" />
+                    </span>
+                    <h3 className="font-semibold">{title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border/40 bg-surface/60 p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Repository Health</p>
+                  <h3 className="mt-2 font-display text-2xl font-semibold">Validation Ready</h3>
+                </div>
+                <Badge variant="outline" className="border-success/40 bg-success/10 text-success">Enterprise</Badge>
+              </div>
+              <div className="mt-6 rounded-xl border border-success/25 bg-success/10 p-5 text-center">
+                <p className="text-sm font-medium text-muted-foreground">Compatibility Score</p>
+                <p className="mt-2 font-display text-5xl font-bold text-success">96%</p>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-success/15">
+                  <div className="h-full w-[96%] rounded-full bg-success shadow-[0_0_18px_rgba(22,163,74,0.35)]" />
+                </div>
+              </div>
+              <div className="mt-5 space-y-3">
+                {[
+                  ["package.json", "ok"],
+                  ["Playwright Config", "ok"],
+                  ["GitHub Workflow", "ok"],
+                  ["Tests Folder", "ok"],
+                  ["Fixtures Folder Missing", "warn"],
+                ].map(([label, state]) => (
+                  <div key={label} className="flex items-center justify-between rounded-lg border border-border/40 bg-card/70 px-3 py-2 text-sm">
+                    <span>{label}</span>
+                    {state === "ok" ? <CheckCircle2 className="size-4 text-success" /> : <AlertTriangle className="size-4 text-warning" />}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recommendation</p>
+                <p className="mt-2 font-semibold">Initialize Missing Files</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">Create a branch and Pull Request with missing onboarding files. Existing files are never overwritten silently.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-7 grid gap-4 lg:grid-cols-[1fr_.8fr]">
+            <div className="rounded-xl border border-border/40 bg-card/70 p-5">
+              <h3 className="font-semibold">Why Automation Repository Onboarding?</h3>
+              <div className="mt-4 grid gap-2 md:grid-cols-2">
+                {[
+                  "Connect any Playwright automation repository.",
+                  "Reduce setup time from hours to minutes.",
+                  "Automatically detect repository issues.",
+                  "Eliminate manual GitHub Actions configuration.",
+                  "Standardize validation across projects.",
+                  "Accelerate QA onboarding.",
+                  "Improve developer productivity.",
+                  "Enterprise-ready repository onboarding.",
+                ].map((benefit) => (
+                  <div key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="size-4 shrink-0 text-success" />
+                    {benefit}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-xl border border-border/40 bg-card/70 p-5">
+              <h3 className="font-semibold">Feature Comparison</h3>
+              <div className="mt-4 overflow-hidden rounded-lg border border-border/40 text-sm">
+                <div className="grid grid-cols-3 bg-surface/70 font-semibold">
+                  <div className="p-3">Capability</div>
+                  <div className="p-3">AI QA Copilot</div>
+                  <div className="p-3">Typical QA Tools</div>
+                </div>
+                <div className="grid grid-cols-3 border-t border-border/40">
+                  <div className="p-3">Automation Repository Onboarding</div>
+                  <div className="p-3 text-success">✅ Fully Automated</div>
+                  <div className="p-3 text-destructive">❌ Manual Setup Required</div>
+                </div>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button onClick={onStart}>
+                  <Github className="size-4" />
+                  Connect Repository
+                </Button>
+                <Button variant="outline" onClick={onBookDemo}>Book Demo</Button>
+                <Button variant="ghost" onClick={() => window.open("https://github.com/dksable/ai-qa-copilot-fe/tree/main/docs", "_blank", "noopener,noreferrer")}>View Documentation</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </LandingSection>
 
       <LandingSection
         eyebrow="The Challenge"

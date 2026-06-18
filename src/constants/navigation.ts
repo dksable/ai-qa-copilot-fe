@@ -51,7 +51,7 @@ export const NAV_ITEMS: NavigationItem[] = [
     description: "Repos, impact, PRs",
     children: [
       { label: "Application Repositories", value: "repository-application", icon: GitBranch, description: "Frontend/backend repos" },
-      { label: "Automation Repository", value: "repository-automation", icon: GitPullRequest, description: "Playwright repo setup" },
+      { label: "Automation Onboarding", value: "repository-automation", icon: GitPullRequest, description: "Connect, analyze, initialize, validate" },
       { label: "Repository Activity", value: "repository-activity", icon: GitCompare, description: "Webhook events" },
       { label: "AI Impact Analysis", value: "repository-impact", icon: ShieldCheck, description: "Map changes to tests" },
       { label: "Playwright Update Workflow", value: "repository-playwright", icon: GitPullRequest, description: "Validate and create PRs" },
