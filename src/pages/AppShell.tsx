@@ -5355,6 +5355,55 @@ function RepositoryActivityPanel({
                             <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Validation Summary Log</p>
                             <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{validationRun.logs}</pre>
                           </div>
+                          {validationRun.validationDebugLogs?.length ? (
+                            <details className="rounded-lg border border-border/40 bg-card/70 p-3">
+                              <summary className="cursor-pointer text-sm font-semibold">Validation Debug Logs</summary>
+                              <div className="mt-3 space-y-3">
+                                {validationRun.validationDebugLogs.map((step, index) => (
+                                  <div key={`${step.stepName}-${index}`} className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div>
+                                        <p className="font-semibold">{step.stepName}</p>
+                                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{step.command}</p>
+                                      </div>
+                                      <Badge
+                                        className={cn(
+                                          step.status === "Passed" && "border-success/30 bg-success/10 text-success",
+                                          step.status === "Failed" && "border-destructive/30 bg-destructive/10 text-destructive",
+                                          step.status === "Skipped" && "border-warning/30 bg-warning/10 text-warning",
+                                        )}
+                                        variant="outline"
+                                      >
+                                        {step.status}
+                                      </Badge>
+                                    </div>
+                                    <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+                                      <MiniStat label="Exit Code" value={String(step.exitCode)} />
+                                      <MiniStat label="Working Directory" value={step.workingDirectory} />
+                                      <MiniStat label="Repository Path" value={step.repositoryPath} />
+                                      <MiniStat label="Node" value={step.nodeVersion} />
+                                      <MiniStat label="npm" value={step.npmVersion} />
+                                      <MiniStat label="package.json" value={step.packageJsonExists ? "Yes" : "No"} />
+                                      <MiniStat label="package-lock.json" value={step.packageLockExists ? "Yes" : "No"} />
+                                      <MiniStat label="playwright.config.ts" value={step.playwrightConfigTsExists ? "Yes" : "No"} />
+                                      <MiniStat label="node_modules" value={step.nodeModulesExists ? "Yes" : "No"} />
+                                      <MiniStat label="@playwright/test" value={step.playwrightTestInstalled ? "Yes" : "No"} />
+                                    </div>
+                                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">stdout</p>
+                                        <pre className="max-h-44 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{step.stdout || "No stdout captured."}</pre>
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">stderr</p>
+                                        <pre className="max-h-44 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{step.stderr || "No stderr captured."}</pre>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          ) : null}
                           {validationRun.stackTrace && (
                             <div>
                               <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Stack Trace</p>
