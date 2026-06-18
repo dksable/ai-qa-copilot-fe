@@ -87,6 +87,10 @@ Backend routes:
 - [Analytics and Reporting](./14-Analytics-and-Reporting.md)
 - [API Documentation](./17-API-Documentation.md)
 
+## v2 Validation Intelligence Note
+
+AI QA Copilot v2.0 adds validation intelligence across repository workflows: GitHub Actions validation, AI failure analysis, reviewable auto-fix proposals, retry validation, validation history, and release readiness reporting. These capabilities preserve the review-first governance model while helping QA teams make faster, safer release decisions.
+
 ## Key Takeaways
 
 ### Summary

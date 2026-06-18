@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-AI QA Copilot is an AI-powered Quality Engineering Platform. The workspace contains a React frontend and an Express/TypeScript backend for project management, AI test generation, review workflows, manual test execution, analytics, AI providers, GitHub automation repository integration, Smart Repository Analysis, and AI Repository Sync Beta.
+AI QA Copilot is an AI-powered Quality Engineering Platform. The workspace contains a React frontend and an Express/TypeScript backend for project management, AI test generation, review workflows, manual test execution, analytics, AI providers, GitHub automation repository integration, Smart Repository Analysis, AI Repository Sync Beta, GitHub Actions Playwright validation, AI failure analysis, auto-fix proposals, retry validation, validation history, and release readiness.
 
 ## Folder Structure
 
@@ -79,6 +79,7 @@ npm run build
 - Read existing files before editing.
 - Keep docs synchronized with implemented routes and UI modules.
 - Use MongoDB configuration through environment variables.
+- Keep validation intelligence changes review-first: no direct default-branch pushes, no auto-merge, and no auto-applied AI fixes.
 
 ## Don'ts
 

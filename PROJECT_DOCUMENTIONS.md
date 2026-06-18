@@ -8,7 +8,8 @@ The current POC is designed as a modern SaaS demo covering the complete QA lifec
 
 ```text
 Requirement -> AI Test Generation -> Review & Approval -> Manual Test Execution
--> Playwright Test Generation -> Export / Analytics / Team Collaboration
+-> Repository Intelligence -> Playwright Update Generation -> GitHub Actions Validation
+-> AI Failure Analysis / Auto Fix / Retry -> Release Readiness -> Pull Request
 ```
 
 ## 2. Target Users
@@ -125,6 +126,33 @@ src/
 - Pricing, trial, usage, and quota APIs
 - Export APIs for PDF/Excel
 - AI provider configuration and routing APIs
+- Repository intelligence, impact analysis, validation history, AI failure analysis, auto-fix, retry validation, and release readiness APIs
+
+## 6.1 Validation Intelligence Architecture
+
+AI QA Copilot v2.0 adds a review-first validation intelligence layer on top of the GitHub automation workflow.
+
+```text
+Application Change
+-> Repository Activity
+-> AI Impact Analysis
+-> Generate Playwright Updates
+-> Approve Updates
+-> Run GitHub Actions Validation
+-> AI Failure Analysis
+-> Generate Auto Fix
+-> Retry Validation
+-> Release Readiness
+-> Pull Request
+```
+
+Key rules:
+
+- Validation uses the connected automation repository workflow instead of running long Playwright jobs inside the Render backend.
+- AI fixes are generated as proposals only.
+- Users must approve, reject, or edit proposed fixes.
+- Retry validation is user-triggered and capped.
+- Pull requests remain review-first and are never auto-merged.
 
 ## 7. Completed POC Features
 
@@ -158,6 +186,10 @@ Highlighted capabilities:
 - GitHub automation repository integration
 - Smart repository analysis
 - AI repository sync beta
+- GitHub Actions Playwright validation
+- AI failure analysis and auto-fix proposals
+- Retry validation and validation history
+- Release readiness dashboard
 - GitHub/Bitbucket repository integration as an enterprise automation capability
 
 ### 7.2 Authentication

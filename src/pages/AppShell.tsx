@@ -153,8 +153,12 @@ import {
   type RepositoryGeneratedTestUpdate,
   type RepositoryValidationRun,
   type RepositoryValidationRecommendation,
+  type ReleaseReadinessSnapshot,
   type RepositorySync,
   type ReviewDetail,
+  type ValidationAutoFix,
+  type ValidationFailureAnalysis,
+  type ValidationRetryAttempt,
   type Workspace,
   type WorkspaceDetail,
   type WorkspaceMember,
@@ -813,7 +817,9 @@ export default function AppShell() {
           activeView === "repository-automation" ||
           activeView === "repository-activity" ||
           activeView === "repository-impact" ||
-          activeView === "repository-playwright" ? (
+          activeView === "repository-playwright" ||
+          activeView === "repository-validation-history" ||
+          activeView === "repository-release-readiness" ? (
           <RepositoryIntelligencePage
             activeView={activeView}
             workspaceId={selectedWorkspaceId || auth?.workspace?.id || ""}
@@ -3503,7 +3509,7 @@ const aiFeatureLabels: Record<AIProviderFeatureName, string> = {
 type RepositoryIntelligenceTab = "automation" | "application" | "activity";
 
 const repositoryIntelligenceMeta: Record<
-  "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright",
+  "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright" | "repository-validation-history" | "repository-release-readiness",
   { title: string; description: string; tab: RepositoryIntelligenceTab }
 > = {
   "repository-application": {
@@ -3529,6 +3535,16 @@ const repositoryIntelligenceMeta: Record<
   "repository-playwright": {
     title: "Playwright Update Workflow",
     description: "Generate updates, review diffs, run validation, get AI recommendations, and create pull requests.",
+    tab: "activity",
+  },
+  "repository-validation-history": {
+    title: "Validation History",
+    description: "Review validation attempts, GitHub Actions outcomes, AI failure analysis, auto-fixes, and retry attempts.",
+    tab: "activity",
+  },
+  "repository-release-readiness": {
+    title: "Release Readiness",
+    description: "Track validation pass rate, high-risk changes, pending fixes, and release recommendation score.",
     tab: "activity",
   },
 };
@@ -3566,7 +3582,7 @@ function RepositoryIntelligencePage({
   isLoading,
   onRefresh,
 }: {
-  activeView: "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright";
+  activeView: "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright" | "repository-validation-history" | "repository-release-readiness";
   workspaceId: string;
   role: WorkspaceRole;
   config: GitHubAutomationConfig | null;
@@ -3591,18 +3607,201 @@ function RepositoryIntelligencePage({
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{meta.description}</p>
         </div>
       </div>
-      <AutomationRepositorySettings
-        workspaceId={workspaceId}
-        role={role}
-        config={config}
-        analysis={analysis}
-        syncs={syncs}
-        applicationRepositories={applicationRepositories}
-        repositoryActivities={repositoryActivities}
-        isLoading={isLoading}
-        initialTab={meta.tab}
-        onRefresh={onRefresh}
-      />
+      {activeView === "repository-validation-history" ? (
+        <ValidationHistoryPage workspaceId={workspaceId} />
+      ) : activeView === "repository-release-readiness" ? (
+        <ReleaseReadinessPage workspaceId={workspaceId} />
+      ) : (
+        <AutomationRepositorySettings
+          workspaceId={workspaceId}
+          role={role}
+          config={config}
+          analysis={analysis}
+          syncs={syncs}
+          applicationRepositories={applicationRepositories}
+          repositoryActivities={repositoryActivities}
+          isLoading={isLoading}
+          initialTab={meta.tab}
+          onRefresh={onRefresh}
+        />
+      )}
+    </div>
+  );
+}
+
+function ValidationHistoryPage({ workspaceId }: { workspaceId: string }) {
+  const [runs, setRuns] = useState<RepositoryValidationRun[]>([]);
+  const [selectedRun, setSelectedRun] = useState<{
+    validationRun: RepositoryValidationRun;
+    failureAnalysis: ValidationFailureAnalysis | null;
+    autoFixes: ValidationAutoFix[];
+    retries: ValidationRetryAttempt[];
+    recommendation: RepositoryValidationRecommendation | null;
+  } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    setIsLoading(true);
+    projectApi
+      .listValidationHistory({ workspaceId })
+      .then(setRuns)
+      .catch(() => setRuns([]))
+      .finally(() => setIsLoading(false));
+  }, [workspaceId]);
+
+  const openDetail = async (runId: string) => {
+    try {
+      setSelectedRun(await projectApi.getValidationHistoryDetail(runId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load validation detail");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-4">
+        <MiniStat label="Total Runs" value={runs.length} />
+        <MiniStat label="Passed" value={runs.filter((run) => run.status === "Passed").length} />
+        <MiniStat label="Failed" value={runs.filter((run) => run.status === "Failed" || run.status === "Error").length} />
+        <MiniStat label="GitHub Actions" value={runs.filter((run) => run.validationProvider === "github-actions").length} />
+      </div>
+      <Card className="app-card overflow-hidden p-0">
+        <div className="border-b border-border/40 p-5">
+          <h2 className="font-display text-xl font-semibold">Validation History</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Track validation attempts, workflow results, recommendations, fixes, and retries.</p>
+        </div>
+        {isLoading ? (
+          <Skeleton className="m-5 h-48" />
+        ) : runs.length === 0 ? (
+          <div className="p-10 text-center text-sm text-muted-foreground">No validation runs yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Branch</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Passed</th>
+                  <th className="px-4 py-3">Failed</th>
+                  <th className="px-4 py-3">Skipped</th>
+                  <th className="px-4 py-3">Duration</th>
+                  <th className="px-4 py-3">Workflow</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {runs.map((run) => (
+                  <tr key={run.id}>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(run.createdAt)}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{run.validationBranchName || "-"}</td>
+                    <td className="px-4 py-3"><Badge variant="outline">{run.status}</Badge></td>
+                    <td className="px-4 py-3">{run.passed}</td>
+                    <td className="px-4 py-3">{run.failed}</td>
+                    <td className="px-4 py-3">{run.skipped}</td>
+                    <td className="px-4 py-3">{Math.round(run.duration / 1000)}s</td>
+                    <td className="px-4 py-3">
+                      {run.workflowRunUrl ? <a className="font-semibold text-primary underline" href={run.workflowRunUrl} target="_blank" rel="noreferrer">Open</a> : "-"}
+                    </td>
+                    <td className="px-4 py-3"><Button variant="outline" size="sm" onClick={() => openDetail(run.id)}>View</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <Dialog open={Boolean(selectedRun)} onOpenChange={(open) => !open && setSelectedRun(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader><DialogTitle>Validation Detail</DialogTitle></DialogHeader>
+          {selectedRun && (
+            <div className="max-h-[75vh] space-y-4 overflow-y-auto pr-2">
+              <div className="grid gap-3 md:grid-cols-4">
+                <MiniStat label="Status" value={selectedRun.validationRun.status} />
+                <MiniStat label="Passed" value={selectedRun.validationRun.passed} />
+                <MiniStat label="Failed" value={selectedRun.validationRun.failed} />
+                <MiniStat label="Retries" value={selectedRun.retries.length} />
+              </div>
+              {selectedRun.failureAnalysis && (
+                <Card className="app-card p-4">
+                  <h3 className="font-semibold">AI Failure Analysis</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">{selectedRun.failureAnalysis.rootCause}</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-4">
+                    <MiniStat label="Category" value={selectedRun.failureAnalysis.category} />
+                    <MiniStat label="Risk" value={selectedRun.failureAnalysis.riskLevel} />
+                    <MiniStat label="Confidence" value={`${selectedRun.failureAnalysis.confidenceScore}%`} />
+                    <MiniStat label="Auto Fix" value={selectedRun.failureAnalysis.autoFixAvailable ? "Available" : "No"} />
+                  </div>
+                </Card>
+              )}
+              <Card className="app-card p-4">
+                <h3 className="font-semibold">Logs</h3>
+                <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{selectedRun.validationRun.logs || selectedRun.validationRun.stderr || "No logs available."}</pre>
+              </Card>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ReleaseReadinessPage({ workspaceId }: { workspaceId: string }) {
+  const [snapshot, setSnapshot] = useState<ReleaseReadinessSnapshot | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    setIsLoading(true);
+    projectApi
+      .getReleaseReadinessSummary(workspaceId)
+      .then(setSnapshot)
+      .catch(() => setSnapshot(null))
+      .finally(() => setIsLoading(false));
+  }, [workspaceId]);
+
+  if (isLoading) return <Skeleton className="h-64 w-full" />;
+  if (!snapshot) {
+    return <Card className="border-dashed border-border/50 bg-card/40 p-10 text-center text-sm text-muted-foreground">No release readiness data yet.</Card>;
+  }
+
+  const tone = snapshot.readinessScore >= 90
+    ? "border-success/30 bg-success/10 text-success"
+    : snapshot.readinessScore >= 70
+      ? "border-warning/30 bg-warning/10 text-warning"
+      : "border-destructive/30 bg-destructive/10 text-destructive";
+
+  return (
+    <div className="space-y-5">
+      <Card className={cn("app-card p-6", tone)}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide">Release Readiness Score</p>
+            <h2 className="mt-2 font-display text-5xl font-bold">{snapshot.readinessScore}</h2>
+            <p className="mt-2 text-sm">{snapshot.recommendation}</p>
+          </div>
+          <Progress value={snapshot.readinessScore} className="h-3 w-full max-w-md" />
+        </div>
+      </Card>
+      <div className="grid gap-3 md:grid-cols-4">
+        <MiniStat label="Automation Pass Rate" value={`${snapshot.automationPassRate}%`} />
+        <MiniStat label="Failed Validations" value={snapshot.failedValidations} />
+        <MiniStat label="Open High-Risk Changes" value={snapshot.openHighRiskChanges} />
+        <MiniStat label="Pending AI Fixes" value={snapshot.pendingFixes} />
+        <MiniStat label="PRs Waiting Review" value={snapshot.prsWaitingForReview} />
+        <MiniStat label="Coverage Score" value={`${snapshot.coverageScore}%`} />
+        <MiniStat label="Manual Pass Rate" value={`${snapshot.manualExecutionPassRate}%`} />
+        <MiniStat label="Snapshot" value={formatDate(snapshot.createdAt)} />
+      </div>
+      <Card className="app-card p-5">
+        <h3 className="font-semibold">Risk Distribution</h3>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {Object.entries(snapshot.riskSummary).map(([key, value]) => (
+            <MiniStat key={key} label={key.replace(/([A-Z])/g, " $1")} value={value} />
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -4462,9 +4661,15 @@ function RepositoryActivityPanel({
   const [testUpdates, setTestUpdates] = useState<RepositoryGeneratedTestUpdate[]>([]);
   const [validationRun, setValidationRun] = useState<RepositoryValidationRun | null>(null);
   const [validationRecommendation, setValidationRecommendation] = useState<RepositoryValidationRecommendation | null>(null);
+  const [failureAnalysis, setFailureAnalysis] = useState<ValidationFailureAnalysis | null>(null);
+  const [autoFixes, setAutoFixes] = useState<ValidationAutoFix[]>([]);
+  const [retryAttempts, setRetryAttempts] = useState<ValidationRetryAttempt[]>([]);
   const [isUpdateGenerating, setIsUpdateGenerating] = useState(false);
   const [isValidationRunning, setIsValidationRunning] = useState(false);
   const [isRecommendationLoading, setIsRecommendationLoading] = useState(false);
+  const [isFailureAnalysisLoading, setIsFailureAnalysisLoading] = useState(false);
+  const [isAutoFixLoading, setIsAutoFixLoading] = useState(false);
+  const [isRetryingValidation, setIsRetryingValidation] = useState(false);
   const [isPrCreating, setIsPrCreating] = useState(false);
   const [fixSuggestion, setFixSuggestion] = useState("");
   const totalFiles = activities.reduce((sum, activity) => sum + activity.fileCount, 0);
@@ -4494,12 +4699,29 @@ function RepositoryActivityPanel({
         setTestUpdates(updates);
         setValidationRun(validation);
         setValidationRecommendation(recommendation);
+        if (validation) {
+          const [failure, fixes, retries] = await Promise.all([
+            projectApi.getValidationFailureAnalysis(validation.id).catch(() => null),
+            projectApi.listValidationAutoFixes(validation.id).catch(() => []),
+            projectApi.listValidationRetries(validation.id).catch(() => []),
+          ]);
+          setFailureAnalysis(failure);
+          setAutoFixes(fixes);
+          setRetryAttempts(retries);
+        } else {
+          setFailureAnalysis(null);
+          setAutoFixes([]);
+          setRetryAttempts([]);
+        }
       })
       .catch(() => {
         setImpactAnalysis(null);
         setTestUpdates([]);
         setValidationRun(null);
         setValidationRecommendation(null);
+        setFailureAnalysis(null);
+        setAutoFixes([]);
+        setRetryAttempts([]);
       })
       .finally(() => setIsImpactLoading(false));
   }, [activeActivity]);
@@ -4525,6 +4747,9 @@ function RepositoryActivityPanel({
       setTestUpdates([]);
       setValidationRun(null);
       setValidationRecommendation(null);
+      setFailureAnalysis(null);
+      setAutoFixes([]);
+      setRetryAttempts([]);
       toast.success(regenerate ? "Impact analysis regenerated" : "Impact analysis completed");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Impact analysis failed");
@@ -4586,6 +4811,9 @@ function RepositoryActivityPanel({
       const startedRun = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id);
       setValidationRun(startedRun);
       setValidationRecommendation(null);
+      setFailureAnalysis(null);
+      setAutoFixes([]);
+      setRetryAttempts([]);
       toast.success("Validation started. Results will appear here automatically.");
 
       let latestRun = startedRun;
@@ -4621,6 +4849,68 @@ function RepositoryActivityPanel({
       toast.warning("AI recommendation could not be generated. Validation result is still available.");
     } finally {
       setIsRecommendationLoading(false);
+    }
+  };
+
+  const runFailureAnalysis = async () => {
+    if (!validationRun) return;
+    try {
+      setIsFailureAnalysisLoading(true);
+      const analysis = await projectApi.generateValidationFailureAnalysis(validationRun.id);
+      setFailureAnalysis(analysis);
+      toast.success("AI failure analysis generated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate failure analysis");
+    } finally {
+      setIsFailureAnalysisLoading(false);
+    }
+  };
+
+  const generateAutoFix = async () => {
+    if (!validationRun) return;
+    try {
+      setIsAutoFixLoading(true);
+      const fix = await projectApi.generateValidationAutoFix(validationRun.id);
+      setAutoFixes((current) => [fix, ...current]);
+      toast.success("AI auto-fix proposal generated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate auto-fix");
+    } finally {
+      setIsAutoFixLoading(false);
+    }
+  };
+
+  const updateAutoFixStatus = async (fix: ValidationAutoFix, action: "approve" | "reject" | "edit") => {
+    try {
+      if (action === "approve") await projectApi.approveValidationAutoFix(fix.id);
+      if (action === "reject") await projectApi.rejectValidationAutoFix(fix.id);
+      if (action === "edit") {
+        const fixedCode = window.prompt("Edit fixed Playwright code", fix.fixedCode);
+        if (!fixedCode || fixedCode === fix.fixedCode) return;
+        await projectApi.editValidationAutoFix(fix.id, { fixedCode });
+      }
+      setAutoFixes(await projectApi.listValidationAutoFixes(fix.validationRunId));
+      await refreshTestUpdates();
+      toast.success(action === "approve" ? "Auto-fix approved" : action === "reject" ? "Auto-fix rejected" : "Auto-fix edited");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update auto-fix");
+    }
+  };
+
+  const retryValidation = async () => {
+    if (!validationRun) return;
+    try {
+      setIsRetryingValidation(true);
+      const result = await projectApi.retryValidationRun(validationRun.id);
+      setValidationRun(result.validationRun);
+      setRetryAttempts(await projectApi.listValidationRetries(validationRun.id));
+      setValidationRecommendation(null);
+      setFailureAnalysis(null);
+      toast.success(`Retry attempt ${result.retry.attemptNumber} completed`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to retry validation");
+    } finally {
+      setIsRetryingValidation(false);
     }
   };
 
@@ -5085,6 +5375,104 @@ function RepositoryActivityPanel({
                               {fixSuggestion && <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">{fixSuggestion}</p>}
                             </div>
                           )}
+                          {validationRun.failed > 0 && (
+                            <Card className="app-card p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <h4 className="font-semibold">AI Failure Analysis</h4>
+                                  <p className="mt-1 text-sm text-muted-foreground">Root cause, category, risk, and auto-fix readiness for failed validation.</p>
+                                </div>
+                                <Button variant="outline" size="sm" onClick={runFailureAnalysis} disabled={isFailureAnalysisLoading}>
+                                  {isFailureAnalysisLoading ? <Loader2 className="size-4 animate-spin" /> : <Brain className="size-4" />}
+                                  Analyze Failure
+                                </Button>
+                              </div>
+                              {failureAnalysis ? (
+                                <div className="mt-4 space-y-3">
+                                  <p className="rounded-md border border-border/40 bg-card/70 p-3 text-sm">{failureAnalysis.rootCause}</p>
+                                  <div className="grid gap-3 md:grid-cols-5">
+                                    <MiniStat label="Category" value={failureAnalysis.category} />
+                                    <MiniStat label="Module" value={failureAnalysis.affectedModule} />
+                                    <MiniStat label="Risk" value={failureAnalysis.riskLevel} />
+                                    <MiniStat label="Confidence" value={`${failureAnalysis.confidenceScore}%`} />
+                                    <MiniStat label="Auto Fix" value={failureAnalysis.autoFixAvailable ? "Yes" : "No"} />
+                                  </div>
+                                  <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">{failureAnalysis.recommendedFix}</p>
+                                  {failureAnalysis.autoFixAvailable && (
+                                    <Button variant="outline" size="sm" onClick={generateAutoFix} disabled={isAutoFixLoading}>
+                                      {isAutoFixLoading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                                      Generate Auto Fix
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="mt-4 rounded-lg border border-dashed border-border/50 p-4 text-sm text-muted-foreground">No AI failure analysis yet.</p>
+                              )}
+                            </Card>
+                          )}
+                          {autoFixes.length > 0 && (
+                            <Card className="app-card p-4">
+                              <h4 className="font-semibold">AI Auto Fix</h4>
+                              <div className="mt-4 space-y-4">
+                                {autoFixes.map((fix) => (
+                                  <div key={fix.id} className="rounded-lg border border-border/40 bg-card/70 p-4">
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <div>
+                                        <p className="font-mono text-sm font-semibold">{fix.testFilePath}</p>
+                                        <p className="mt-1 text-sm text-muted-foreground">{fix.fixSummary}</p>
+                                      </div>
+                                      <div className="flex flex-wrap gap-2">
+                                        <Badge variant="outline">{fix.status}</Badge>
+                                        <Badge variant="outline">{fix.confidenceScore}%</Badge>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Before Fix</p>
+                                        <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{fix.oldCode}</pre>
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">AI Fixed Code</p>
+                                        <pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{fix.fixedCode}</pre>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      <Button variant="outline" size="sm" onClick={() => updateAutoFixStatus(fix, "approve")}>Approve Fix</Button>
+                                      <Button variant="outline" size="sm" onClick={() => updateAutoFixStatus(fix, "reject")}>Reject Fix</Button>
+                                      <Button variant="outline" size="sm" onClick={() => updateAutoFixStatus(fix, "edit")}>Edit Fix</Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </Card>
+                          )}
+                          <Card className="app-card p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <h4 className="font-semibold">Retry Validation</h4>
+                                <p className="mt-1 text-sm text-muted-foreground">Retry after approving an auto-fix. Maximum 3 retry attempts.</p>
+                              </div>
+                              <Button variant="outline" size="sm" onClick={retryValidation} disabled={isRetryingValidation || retryAttempts.length >= 3}>
+                                {isRetryingValidation ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                                Retry Validation
+                              </Button>
+                            </div>
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              <div className="rounded-lg border border-border/40 bg-card/70 p-3">
+                                <p className="text-xs font-semibold uppercase text-muted-foreground">Attempt 1</p>
+                                <p className="mt-2 font-semibold">{validationRun.status}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">Passed {validationRun.passed} / Failed {validationRun.failed} / Skipped {validationRun.skipped}</p>
+                              </div>
+                              {retryAttempts.map((attempt) => (
+                                <div key={attempt.id} className="rounded-lg border border-border/40 bg-card/70 p-3">
+                                  <p className="text-xs font-semibold uppercase text-muted-foreground">Attempt {attempt.attemptNumber}</p>
+                                  <p className="mt-2 font-semibold">{attempt.status}</p>
+                                  <p className="mt-1 text-xs text-muted-foreground">Passed {attempt.passed} / Failed {attempt.failed} / Skipped {attempt.skipped}</p>
+                                  {attempt.workflowUrl && <a className="mt-2 inline-block text-xs font-semibold text-primary underline" href={attempt.workflowUrl} target="_blank" rel="noreferrer">Open workflow</a>}
+                                </div>
+                              ))}
+                            </div>
+                          </Card>
                           <div className={`rounded-lg border p-4 ${
                             validationRecommendation?.releaseRecommendation === "Safe to Merge"
                               ? "border-success/30 bg-success/10"

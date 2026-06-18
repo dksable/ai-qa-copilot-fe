@@ -193,6 +193,40 @@ Execution status request:
 | POST | `/api/integrations/github/sync/:syncId/create-update-pr` | Create update PR from preview. |
 | POST | `/api/integrations/github/sync/:syncId/create-pr` | Create report-style sync PR. |
 
+## Validation Intelligence APIs
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/api/validation/:validationRunId/failure-analysis` | Generate AI failure analysis for a validation run. |
+| GET | `/api/validation/:validationRunId/failure-analysis` | Retrieve the latest failure analysis. |
+| POST | `/api/validation/:validationRunId/auto-fix` | Generate reviewable AI auto-fix proposals. |
+| GET | `/api/validation/:validationRunId/auto-fix` | List auto-fix proposals for a validation run. |
+| PATCH | `/api/validation/auto-fix/:fixId/approve` | Approve an auto-fix proposal. |
+| PATCH | `/api/validation/auto-fix/:fixId/reject` | Reject an auto-fix proposal. |
+| PATCH | `/api/validation/auto-fix/:fixId/edit` | Edit proposed fixed Playwright code. |
+| POST | `/api/validation/:validationRunId/retry` | Trigger a user-controlled validation retry. |
+| GET | `/api/validation/:validationRunId/retries` | List retry attempts for a validation run. |
+| GET | `/api/validation/history` | List validation runs across repositories/projects. |
+| GET | `/api/validation/history/:validationRunId` | Get validation detail, analysis, fixes, retries, and PR metadata. |
+| GET | `/api/release-readiness/summary` | Workspace-level release readiness summary. |
+| GET | `/api/release-readiness/project/:projectId` | Project-level release readiness summary. |
+
+Failure analysis request example:
+
+```json
+{
+  "forceRegenerate": false
+}
+```
+
+Auto-fix edit request example:
+
+```json
+{
+  "fixedCode": "import { test, expect } from '@playwright/test';\n\n..."
+}
+```
+
 ## Analytics APIs
 
 | Method | Endpoint | Description |
@@ -267,6 +301,10 @@ Execution status request:
 - [System Architecture](./06-System-Architecture.md)
 - [Security](./16-Security.md)
 - [Deployment Guide](./18-Deployment-Guide.md)
+
+## v2 Validation Intelligence Note
+
+AI QA Copilot v2.0 adds validation intelligence across repository workflows: GitHub Actions validation, AI failure analysis, reviewable auto-fix proposals, retry validation, validation history, and release readiness reporting. These capabilities preserve the review-first governance model while helping QA teams make faster, safer release decisions.
 
 ## Key Takeaways
 

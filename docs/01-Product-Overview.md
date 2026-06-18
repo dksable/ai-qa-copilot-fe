@@ -62,6 +62,10 @@ AI QA Copilot is an AI-powered Quality Engineering Platform that helps teams man
 - [AI Features](./09-AI-Features.md)
 - [Product Roadmap](./19-Product-Roadmap.md)
 
+## v2 Validation Intelligence Note
+
+AI QA Copilot v2.0 adds validation intelligence across repository workflows: GitHub Actions validation, AI failure analysis, reviewable auto-fix proposals, retry validation, validation history, and release readiness reporting. These capabilities preserve the review-first governance model while helping QA teams make faster, safer release decisions.
+
 ## Key Takeaways
 
 ### Summary

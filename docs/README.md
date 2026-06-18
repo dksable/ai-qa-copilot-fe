@@ -55,9 +55,16 @@ flowchart LR
   Review --> Playwright["Playwright Skeleton"]
   Playwright --> GitHub["GitHub Pull Request"]
   GitHub --> RepoSync["AI Repository Sync Beta"]
+  RepoSync --> Validation["GitHub Actions Validation"]
+  Validation --> Intelligence["AI Failure Analysis, Auto Fix, Retry"]
+  Intelligence --> Readiness["Release Readiness"]
   Execution --> Analytics
-  RepoSync --> Analytics
+  Readiness --> Analytics
 ```
+
+## v2 Validation Intelligence
+
+AI QA Copilot v2.0 extends repository intelligence beyond impact analysis. The platform can now validate approved Playwright updates through GitHub Actions, analyze failures with AI, generate reviewable auto-fix proposals, retry validation attempts, preserve validation history, and surface release readiness signals for QA leads and engineering managers.
 
 [Insert Screenshot: AI QA Copilot Landing Page]
 

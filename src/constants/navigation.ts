@@ -55,6 +55,8 @@ export const NAV_ITEMS: NavigationItem[] = [
       { label: "Repository Activity", value: "repository-activity", icon: GitCompare, description: "Webhook events" },
       { label: "AI Impact Analysis", value: "repository-impact", icon: ShieldCheck, description: "Map changes to tests" },
       { label: "Playwright Update Workflow", value: "repository-playwright", icon: GitPullRequest, description: "Validate and create PRs" },
+      { label: "Validation History", value: "repository-validation-history", icon: ClipboardList, description: "Validation runs and fixes" },
+      { label: "Release Readiness", value: "repository-release-readiness", icon: BarChart3, description: "Release decision dashboard" },
     ],
   },
   { label: "Manual Test Execution", value: "execution", icon: PlayCircle, description: "Manual test runs" },

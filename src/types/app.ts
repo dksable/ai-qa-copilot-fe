@@ -24,5 +24,7 @@ export type ActiveView =
   | "repository-activity"
   | "repository-impact"
   | "repository-playwright"
+  | "repository-validation-history"
+  | "repository-release-readiness"
   | "workspace"
   | "analytics";

@@ -60,6 +60,10 @@ The backend exposes REST APIs under `/api`. Authentication is JWT-based. Most pr
 - [Manual Test Execution](./10-Manual-Test-Execution.md)
 - [GitHub Integration](./11-GitHub-Integration.md)
 
+## v2 Validation Intelligence Note
+
+AI QA Copilot v2.0 adds validation intelligence across repository workflows: GitHub Actions validation, AI failure analysis, reviewable auto-fix proposals, retry validation, validation history, and release readiness reporting. These capabilities preserve the review-first governance model while helping QA teams make faster, safer release decisions.
+
 ## Key Takeaways
 
 ### Summary

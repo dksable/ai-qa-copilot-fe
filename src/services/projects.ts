@@ -436,6 +436,17 @@ export type RepositoryUpdatePullRequestStatus = "Created" | "Failed";
 export type RepositoryValidationReleaseRecommendation = "Safe to Merge" | "Merge with Caution" | "Do Not Merge";
 export type RepositoryValidationMergeDecision = "Approved" | "Warning" | "Blocked";
 export type RepositoryValidationRecommendationStatus = "Generated" | "Regenerated" | "Failed";
+export type ValidationFailureCategory =
+  | "Locator Issue"
+  | "Assertion Issue"
+  | "App Flow Change"
+  | "Test Data Issue"
+  | "Network/API Issue"
+  | "Environment Issue"
+  | "Dependency Issue"
+  | "Unknown";
+export type ValidationAutoFixStatus = "Pending" | "Approved" | "Rejected" | "Edited";
+export type ReleaseReadinessRecommendation = "Ready for Release" | "Proceed with Caution" | "Not Recommended for Release";
 
 export interface RepositoryImpactAnalysisTest {
   testFilePath: string;
@@ -584,6 +595,77 @@ export interface RepositoryValidationRecommendation {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ValidationFailureAnalysis {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  validationRunId: string;
+  rootCause: string;
+  category: ValidationFailureCategory;
+  affectedModule: string;
+  affectedTestFile: string;
+  confidenceScore: number;
+  recommendedFix: string;
+  autoFixAvailable: boolean;
+  riskLevel: RepositoryRiskLevel;
+  aiProvider: string;
+  aiModel: string;
+  createdAt: string;
+}
+
+export interface ValidationAutoFix {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  validationRunId: string;
+  failureAnalysisId: string;
+  testFilePath: string;
+  oldCode: string;
+  fixedCode: string;
+  fixSummary: string;
+  status: ValidationAutoFixStatus;
+  confidenceScore: number;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ValidationRetryAttempt {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  validationRunId: string;
+  retryValidationRunId?: string;
+  attemptNumber: number;
+  status: RepositoryValidationRunStatus;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration: number;
+  workflowRunId?: number;
+  workflowUrl?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface ReleaseReadinessSnapshot {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  releaseName?: string;
+  readinessScore: number;
+  recommendation: ReleaseReadinessRecommendation;
+  automationPassRate: number;
+  failedValidations: number;
+  openHighRiskChanges: number;
+  pendingFixes: number;
+  prsWaitingForReview: number;
+  coverageScore: number;
+  manualExecutionPassRate: number;
+  riskSummary: Record<string, number>;
+  createdAt: string;
 }
 
 export interface RepositoryAnalysis {
@@ -1667,6 +1749,38 @@ export const projectApi = {
     apiRequest<RepositoryValidationRecommendation>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-recommendation/regenerate`, { method: "POST" }),
   generateRepositoryFixSuggestion: (impactAnalysisId: string) =>
     apiRequest<{ suggestion: string; validationRun?: RepositoryValidationRun }>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/failure-explanation`, { method: "POST" }),
+  generateValidationFailureAnalysis: (validationRunId: string) =>
+    apiRequest<ValidationFailureAnalysis>(`/api/validation/${validationRunId}/failure-analysis`, { method: "POST" }),
+  getValidationFailureAnalysis: (validationRunId: string) =>
+    apiRequest<ValidationFailureAnalysis>(`/api/validation/${validationRunId}/failure-analysis`),
+  generateValidationAutoFix: (validationRunId: string) =>
+    apiRequest<ValidationAutoFix>(`/api/validation/${validationRunId}/auto-fix`, { method: "POST" }),
+  listValidationAutoFixes: (validationRunId: string) =>
+    apiRequest<ValidationAutoFix[]>(`/api/validation/${validationRunId}/auto-fix`),
+  approveValidationAutoFix: (fixId: string) =>
+    apiRequest<ValidationAutoFix>(`/api/validation/auto-fix/${fixId}/approve`, { method: "PATCH" }),
+  rejectValidationAutoFix: (fixId: string) =>
+    apiRequest<ValidationAutoFix>(`/api/validation/auto-fix/${fixId}/reject`, { method: "PATCH" }),
+  editValidationAutoFix: (fixId: string, input: { fixedCode: string; fixSummary?: string }) =>
+    apiRequest<ValidationAutoFix>(`/api/validation/auto-fix/${fixId}/edit`, { method: "PATCH", body: JSON.stringify(input) }),
+  retryValidationRun: (validationRunId: string) =>
+    apiRequest<{ retry: ValidationRetryAttempt; validationRun: RepositoryValidationRun }>(`/api/validation/${validationRunId}/retry`, { method: "POST" }),
+  listValidationRetries: (validationRunId: string) =>
+    apiRequest<ValidationRetryAttempt[]>(`/api/validation/${validationRunId}/retries`),
+  listValidationHistory: (filters: { workspaceId?: string; projectId?: string; status?: string } = {}) =>
+    apiRequest<RepositoryValidationRun[]>(`/api/validation/history${executionQueryString(filters)}`),
+  getValidationHistoryDetail: (validationRunId: string) =>
+    apiRequest<{
+      validationRun: RepositoryValidationRun;
+      failureAnalysis: ValidationFailureAnalysis | null;
+      autoFixes: ValidationAutoFix[];
+      retries: ValidationRetryAttempt[];
+      recommendation: RepositoryValidationRecommendation | null;
+    }>(`/api/validation/history/${validationRunId}`),
+  getReleaseReadinessSummary: (workspaceId?: string) =>
+    apiRequest<ReleaseReadinessSnapshot>(`/api/release-readiness/summary${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
+  getProjectReleaseReadiness: (projectId: string) =>
+    apiRequest<ReleaseReadinessSnapshot>(`/api/release-readiness/project/${projectId}`),
   createRepositoryImpactPullRequest: (impactAnalysisId: string, force = false) =>
     apiRequest<RepositoryUpdatePullRequest & { pullRequest?: { html_url: string; number: number; branchName: string; updatedFiles: string[] } }>(
       `/api/integrations/github/impact-analysis/${impactAnalysisId}/create-pr`,

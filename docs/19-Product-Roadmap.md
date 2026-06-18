@@ -24,9 +24,23 @@ This roadmap separates current implemented capabilities from future product dire
 | GitHub Automation Repository Integration | Implemented |
 | Smart Repository Analysis | Implemented |
 | AI Repository Sync Beta | Implemented |
+| GitHub Actions Playwright Validation | Implemented |
+| AI Failure Analysis | Implemented |
+| AI Auto Fix Proposals | Implemented |
+| Retry Validation | Implemented |
+| Validation History | Implemented |
+| Release Readiness Dashboard | Implemented |
 | MongoDB-backed Persistence | Implemented |
 
-## Version 2.0 - Future Roadmap
+## Version 2.0 - Current Validation Intelligence
+
+| Capability | Status | Description |
+| --- | --- | --- |
+| Validation Intelligence | Implemented | AI-assisted failure analysis, auto-fix proposals, retry validation, and validation history. |
+| Release Governance | Implemented | Readiness score, recommendation, pending fix tracking, and validation trend visibility. |
+| Repository Intelligence Navigation | Implemented | Dedicated sidebar area for repositories, activity, impact analysis, Playwright update workflow, validation history, and release readiness. |
+
+## Version 2.x - Future Roadmap
 
 | Capability | Status | Description |
 | --- | --- | --- |
@@ -34,8 +48,8 @@ This roadmap separates current implemented capabilities from future product dire
 | Xray Integration | Future Roadmap | Test management synchronization. |
 | Azure DevOps | Future Roadmap | Work item, repo, and pipeline support. |
 | Bitbucket | Future Roadmap | Repository integration equivalent to GitHub flows. |
-| AI Bug Analysis | Future Roadmap | Analyze failed execution evidence and suggest bug summaries. |
-| Release Readiness | Future Roadmap | Consolidated quality gates and release recommendations. |
+| Deeper AI Bug Analysis | Future Roadmap | Analyze failed execution evidence and suggest bug summaries. |
+| Release Train Configuration | Future Roadmap | Configure readiness thresholds by release, project, or program. |
 
 ## Version 3.0 - Future Roadmap
 
@@ -64,10 +78,13 @@ timeline
               : Review workflow
               : Manual execution
               : GitHub PR workflow
-  Version 2.0 : Jira and Xray
-              : Azure DevOps
-              : AI bug analysis
+  Version 2.0 : Validation intelligence
+              : AI auto-fix proposals
+              : Retry validation
               : Release readiness
+  Version 2.x : Jira and Xray
+              : Azure DevOps
+              : Deeper AI bug analysis
   Version 3.0 : Self-healing tests
               : Autonomous regression
               : AI root cause analysis

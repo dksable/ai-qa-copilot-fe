@@ -73,6 +73,10 @@ sequenceDiagram
 - [AI Repository Sync Beta](./13-AI-Repository-Sync.md)
 - [Security](./16-Security.md)
 
+## v2 Validation Intelligence Note
+
+AI QA Copilot v2.0 adds validation intelligence across repository workflows: GitHub Actions validation, AI failure analysis, reviewable auto-fix proposals, retry validation, validation history, and release readiness reporting. These capabilities preserve the review-first governance model while helping QA teams make faster, safer release decisions.
+
 ## Key Takeaways
 
 ### Summary
