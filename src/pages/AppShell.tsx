@@ -5365,6 +5365,44 @@ function RepositoryActivityPanel({
                             <MiniStat label="Validation Branch" value={validationRun.validationBranchName || "-"} />
                             <MiniStat label="Workflow Conclusion" value={validationRun.workflowConclusion || "-"} />
                           </div>
+                          {validationRun.validationStageTimings?.length ? (
+                            <div className="rounded-lg border border-border/40 bg-card/70 p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold">Validation Performance</p>
+                                  <p className="mt-1 text-sm text-muted-foreground">Stage timing from GitHub Actions validation.</p>
+                                </div>
+                                <Badge variant="outline">{Math.round(validationRun.duration / 1000)}s total</Badge>
+                              </div>
+                              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                {validationRun.validationStageTimings.map((stage, index) => {
+                                  const seconds = Math.max(0, Math.round(stage.duration / 1000));
+                                  const percent = Math.min(100, Math.max(8, validationRun.duration ? Math.round((stage.duration / validationRun.duration) * 100) : 8));
+                                  return (
+                                    <div key={`${stage.stage}-${index}`} className="rounded-lg border border-border/40 bg-surface/50 p-3">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold">{stage.stage}</p>
+                                        <Badge
+                                          variant="outline"
+                                          className={cn(
+                                            stage.status === "Passed" && "border-success/30 bg-success/10 text-success",
+                                            stage.status === "Failed" && "border-destructive/30 bg-destructive/10 text-destructive",
+                                            stage.status === "Skipped" && "border-warning/30 bg-warning/10 text-warning",
+                                          )}
+                                        >
+                                          {stage.status}
+                                        </Badge>
+                                      </div>
+                                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                                        <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+                                      </div>
+                                      <p className="mt-2 text-xs text-muted-foreground">{seconds}s</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
                           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/40 bg-card/70 p-3 text-sm">
                             <span className="font-semibold">Command:</span>
                             <code className="break-all rounded bg-slate-950 px-2 py-1 text-xs text-slate-100">{validationRun.command || "npx playwright test --reporter=json,html --workers=1"}</code>
