@@ -2306,9 +2306,9 @@ function ProjectDetailPanel({
 
 function MiniStat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 font-display text-xl font-semibold">{value}</p>
+    <div className="min-w-0 rounded-lg border border-border/40 bg-surface/40 p-3">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words font-display text-xl font-semibold">{value}</p>
     </div>
   );
 }
@@ -7891,8 +7891,8 @@ function ReviewQueuePage({
         </Button>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <Card className="min-w-0 border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-semibold">Submitted Items</h2>
             <Badge variant="outline">{queue.length} pending</Badge>
@@ -7907,8 +7907,8 @@ function ReviewQueuePage({
               {queue.map((item) => (
                 <div key={item.id} className="rounded-lg border border-border/40 bg-surface/40 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold">{item.requirementTitle}</p>
+                    <div className="min-w-0">
+                      <p className="break-words font-semibold">{item.requirementTitle}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {item.projectName} / {item.moduleName}
                       </p>
@@ -7917,7 +7917,7 @@ function ReviewQueuePage({
                       {item.reviewStatus}
                     </Badge>
                   </div>
-                  <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                  <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                     <span>Version {item.version}</span>
                     <span>{item.coverageScore}% coverage</span>
                     <span>{item.submittedBy ?? "Current User"}</span>
@@ -7933,8 +7933,8 @@ function ReviewQueuePage({
         </Card>
 
         {detail ? (
-          <div className="space-y-5">
-            <Card className="border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
+          <div className="min-w-0 space-y-5">
+            <Card className="min-w-0 overflow-hidden border-border/50 bg-card/70 p-5 backdrop-blur-xl shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-semibold">{detail.history.requirementTitle}</h2>
@@ -7949,7 +7949,7 @@ function ReviewQueuePage({
                   {detail.history.reviewStatus}
                 </Badge>
               </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-4">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <MiniStat label="Coverage" value={`${detail.history.coverageScore}%`} />
                 <MiniStat label="Positive" value={detail.history.output.positive.length} />
                 <MiniStat label="Negative" value={detail.history.output.negative.length} />
@@ -9310,7 +9310,7 @@ function Results({
           : "border-primary/30 bg-primary/10 text-primary";
 
   return (
-    <Card className="border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
+    <Card className="min-w-0 overflow-hidden border-border/50 bg-card/70 p-6 backdrop-blur-xl shadow-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
