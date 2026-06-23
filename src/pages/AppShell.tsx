@@ -5345,7 +5345,9 @@ function RepositoryActivityPanel({
                                 : "border-destructive/30 bg-destructive/10 text-destructive",
                           )}>
                             {validationInProgress
-                              ? "Validation is running. AI QA Copilot is preparing the automation repository, applying approved updates, and executing Playwright tests."
+                              ? validationRun.validationProvider === "github-actions"
+                                ? "Validation is running in GitHub Actions. AI QA Copilot created a validation branch, pushed approved updates, and is polling the workflow result."
+                                : "Validation is running. AI QA Copilot is preparing the automation repository, applying approved updates, and executing Playwright tests."
                               : validationPassed
                                 ? "Validation passed. Approved Playwright updates are ready for pull request review."
                                 : "Validation completed with failures. Review the error details before creating a pull request."}
@@ -5361,10 +5363,37 @@ function RepositoryActivityPanel({
                             <MiniStat label="Environment" value={validationRun.environment || "-"} />
                           </div>
                           <div className="grid gap-3 md:grid-cols-3">
-                            <MiniStat label="Validation Provider" value={validationRun.validationProvider === "github-actions" ? "GitHub Actions" : validationRun.validationProvider === "backend-fallback" ? "Backend fallback" : "-"} />
+                            <MiniStat label="Validation Provider" value={validationRun.validationProvider === "github-actions" ? "GitHub Actions" : validationRun.validationProvider === "backend-fallback" || validationRun.validationProvider === "local-runner" ? "Local runner fallback" : "-"} />
                             <MiniStat label="Validation Branch" value={validationRun.validationBranchName || "-"} />
                             <MiniStat label="Workflow Conclusion" value={validationRun.workflowConclusion || "-"} />
                           </div>
+                          {validationRun.validationProvider === "github-actions" ? (
+                            <div className="rounded-lg border border-border/40 bg-card/70 p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold">GitHub Actions Workflow</p>
+                                  <p className="mt-1 text-sm text-muted-foreground">Validation is executed in the connected automation repository, not on the Render backend.</p>
+                                </div>
+                                {validationRun.workflowRunUrl ? (
+                                  <a
+                                    className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                                    href={validationRun.workflowRunUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    <ExternalLink className="size-4" />
+                                    Open workflow
+                                  </a>
+                                ) : null}
+                              </div>
+                              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                <MiniStat label="Workflow Run ID" value={validationRun.workflowRunId ? String(validationRun.workflowRunId) : "-"} />
+                                <MiniStat label="Workflow Status" value={validationRun.workflowStatus || "-"} />
+                                <MiniStat label="Conclusion" value={validationRun.workflowConclusion || "-"} />
+                                <MiniStat label="Commit SHA" value={validationRun.workflowCommitSha ? validationRun.workflowCommitSha.slice(0, 12) : "-"} />
+                              </div>
+                            </div>
+                          ) : null}
                           {validationRun.validationStageTimings?.length ? (
                             <div className="rounded-lg border border-border/40 bg-card/70 p-4">
                               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -5491,7 +5520,9 @@ function RepositoryActivityPanel({
                           </div>
                           {validationRun.validationDebugLogs?.length ? (
                             <details className="rounded-lg border border-border/40 bg-card/70 p-3">
-                              <summary className="cursor-pointer text-sm font-semibold">Validation Debug Logs</summary>
+                              <summary className="cursor-pointer text-sm font-semibold">
+                                {validationRun.validationProvider === "github-actions" ? "GitHub Actions Job Steps" : "Validation Debug Logs"}
+                              </summary>
                               <div className="mt-3 space-y-3">
                                 {validationRun.validationDebugLogs.map((step, index) => (
                                   <div key={`${step.stepName}-${index}`} className="rounded-lg border border-border/40 bg-surface/40 p-3">
@@ -5511,18 +5542,36 @@ function RepositoryActivityPanel({
                                         {step.status}
                                       </Badge>
                                     </div>
-                                    <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
-                                      <MiniStat label="Exit Code" value={String(step.exitCode)} />
-                                      <MiniStat label="Working Directory" value={step.workingDirectory} />
-                                      <MiniStat label="Repository Path" value={step.repositoryPath} />
-                                      <MiniStat label="Node" value={step.nodeVersion} />
-                                      <MiniStat label="npm" value={step.npmVersion} />
-                                      <MiniStat label="package.json" value={step.packageJsonExists ? "Yes" : "No"} />
-                                      <MiniStat label="package-lock.json" value={step.packageLockExists ? "Yes" : "No"} />
-                                      <MiniStat label="playwright.config.ts" value={step.playwrightConfigTsExists ? "Yes" : "No"} />
-                                      <MiniStat label="node_modules" value={step.nodeModulesExists ? "Yes" : "No"} />
-                                      <MiniStat label="@playwright/test" value={step.playwrightTestInstalled ? "Yes" : "No"} />
-                                    </div>
+                                    {validationRun.validationProvider === "github-actions" || step.validationProvider === "github-actions" ? (
+                                      <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+                                        <MiniStat label="Workflow Run ID" value={step.workflowRunId ? String(step.workflowRunId) : validationRun.workflowRunId ? String(validationRun.workflowRunId) : "-"} />
+                                        <MiniStat label="Workflow Status" value={step.workflowStatus || validationRun.workflowStatus || "-"} />
+                                        <MiniStat label="Conclusion" value={step.workflowConclusion || validationRun.workflowConclusion || "-"} />
+                                        <MiniStat label="Branch" value={step.branch || validationRun.validationBranchName || "-"} />
+                                        <MiniStat label="Commit" value={step.commitSha ? step.commitSha.slice(0, 12) : validationRun.workflowCommitSha ? validationRun.workflowCommitSha.slice(0, 12) : "-"} />
+                                        <MiniStat label="Job" value={step.jobName || "-"} />
+                                        <MiniStat label="Started" value={step.startedAt ? new Date(step.startedAt).toLocaleTimeString() : "-"} />
+                                        <MiniStat label="Completed" value={step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : "-"} />
+                                      </div>
+                                    ) : (
+                                      <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+                                        <MiniStat label="Exit Code" value={String(step.exitCode)} />
+                                        <MiniStat label="Working Directory" value={step.workingDirectory || "-"} />
+                                        <MiniStat label="Repository Path" value={step.repositoryPath || "-"} />
+                                        <MiniStat label="Node" value={step.nodeVersion || "-"} />
+                                        <MiniStat label="npm" value={step.npmVersion || "-"} />
+                                        <MiniStat label="package.json" value={step.packageJsonExists ? "Yes" : "No"} />
+                                        <MiniStat label="package-lock.json" value={step.packageLockExists ? "Yes" : "No"} />
+                                        <MiniStat label="playwright.config.ts" value={step.playwrightConfigTsExists ? "Yes" : "No"} />
+                                        <MiniStat label="node_modules" value={step.nodeModulesExists ? "Yes" : "No"} />
+                                        <MiniStat label="@playwright/test" value={step.playwrightTestInstalled ? "Yes" : "No"} />
+                                      </div>
+                                    )}
+                                    {(validationRun.validationProvider === "github-actions" || step.validationProvider === "github-actions") && step.jobUrl ? (
+                                      <a className="mt-3 inline-flex text-xs font-semibold text-primary underline" href={step.jobUrl} target="_blank" rel="noreferrer">
+                                        Open job logs
+                                      </a>
+                                    ) : null}
                                     <div className="mt-3 grid gap-3 lg:grid-cols-2">
                                       <div>
                                         <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">stdout</p>
