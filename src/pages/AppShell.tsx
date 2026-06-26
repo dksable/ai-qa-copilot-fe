@@ -1314,8 +1314,6 @@ function Nav({
   onProfile: () => void;
   onLogout: () => void;
 }) {
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
-
   const navigate = (view: ActiveView) => {
     onChangeView(view);
     onMobileOpenChange(false);
@@ -1330,36 +1328,6 @@ function Nav({
         )}
       >
         <SidebarHeader isCollapsed={isCollapsed} onToggleCollapsed={onToggleCollapsed} />
-
-        <div className="border-b border-border/40 p-4">
-          <Select value={selectedWorkspaceId || "none"} onValueChange={onWorkspaceChange}>
-            <SelectTrigger
-              className={cn(
-                "h-11 border-border/60 bg-surface/60",
-                isCollapsed && "justify-center px-2 [&>span]:hidden",
-              )}
-              aria-label="Select workspace"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
-                  {(activeWorkspace?.workspaceName ?? "W").slice(0, 1)}
-                </div>
-                {!isCollapsed && <SelectValue placeholder="Workspace" />}
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              {workspaces.length ? (
-                workspaces.map((workspace) => (
-                  <SelectItem key={workspace.id} value={workspace.id}>
-                    {workspace.workspaceName}
-                  </SelectItem>
-                ))
-              ) : (
-                <SelectItem value="none">Default workspace</SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
 
         <SidebarMenu activeView={activeView} isCollapsed={isCollapsed} onNavigate={navigate} />
         <SidebarFooter auth={auth} isCollapsed={isCollapsed} />
