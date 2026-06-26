@@ -5327,6 +5327,55 @@ function RepositoryActivityPanel({
                                 <Badge variant="outline">{update.confidenceScore}%</Badge>
                               </div>
                             </div>
+                            <div className="mt-3 rounded-lg border border-primary/15 bg-primary/5 p-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold">Repository-Aware AI Quality</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Generated using detected repository patterns, locator strategy, and assertion style.
+                                  </p>
+                                </div>
+                                <Badge variant="outline">{update.repositoryContextSummary?.pattern ?? "Repository pattern"}</Badge>
+                              </div>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                                <MiniStat label="Repo Match" value={`${update.repositoryMatchScore ?? update.qualityReport?.repositoryStyleMatch ?? update.confidenceScore}%`} />
+                                <MiniStat label="Locator" value={`${update.locatorConfidence ?? update.qualityReport?.locatorQuality ?? update.confidenceScore}%`} />
+                                <MiniStat label="Assertion" value={`${update.assertionConfidence ?? update.qualityReport?.assertionQuality ?? update.confidenceScore}%`} />
+                                <MiniStat label="Coverage" value={`${update.businessCoverageScore ?? update.qualityReport?.businessCoverage ?? update.confidenceScore}%`} />
+                                <MiniStat label="Stability" value={`${update.estimatedStabilityScore ?? update.qualityReport?.estimatedExecutionStability ?? update.confidenceScore}%`} />
+                              </div>
+                              <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
+                                <div className="rounded-md bg-background/70 p-2">
+                                  <span className="font-semibold text-foreground">Framework:</span> {update.repositoryContextSummary?.framework ?? "Playwright"}
+                                </div>
+                                <div className="rounded-md bg-background/70 p-2">
+                                  <span className="font-semibold text-foreground">Locators:</span> {update.repositoryContextSummary?.locatorStrategy ?? "Stable locators"}
+                                </div>
+                                <div className="rounded-md bg-background/70 p-2">
+                                  <span className="font-semibold text-foreground">Assertions:</span> {update.repositoryContextSummary?.assertionStyle ?? "Business assertions"}
+                                </div>
+                              </div>
+                              {update.qualityReport ? (
+                                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                  <div>
+                                    <p className="text-xs font-semibold uppercase text-muted-foreground">Potential Risks</p>
+                                    <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                      {(update.qualityReport.potentialRisks.length ? update.qualityReport.potentialRisks : ["No major generation risks detected."]).map((risk) => (
+                                        <li key={risk}>- {risk}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-semibold uppercase text-muted-foreground">Recommendations</p>
+                                    <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                      {(update.qualityReport.recommendations.length ? update.qualityReport.recommendations : ["Run validation before creating a pull request."]).map((recommendation) => (
+                                        <li key={recommendation}>- {recommendation}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
                             <div className="mt-3 grid gap-3 lg:grid-cols-2">
                               <div>
                                 <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Old Code</p>
