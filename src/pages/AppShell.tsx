@@ -6822,28 +6822,28 @@ function LandingPage({
         title="Choose Your AI. No Vendor Lock-In."
         description="Use AI QA Copilot’s built-in AI or connect your organization’s preferred AI provider for test generation, AI chat, impact analysis, and Playwright automation."
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {aiProviderCards.map(({ title, description, badge, icon: Icon }) => (
-            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-5 transition-colors hover:border-primary/40">
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <span className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  <Icon className="size-5" />
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <span className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Icon className="size-4" />
                 </span>
-                {badge && <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">{badge}</Badge>}
+                {badge && <Badge variant="outline" className="h-6 border-primary/40 bg-primary/10 px-2 text-xs text-primary">{badge}</Badge>}
               </div>
-              <h3 className="font-semibold">{title}</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+              <h3 className="text-sm font-semibold">{title}</h3>
+              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{description}</p>
             </div>
           ))}
         </div>
-        <div className="mt-5 rounded-lg border border-primary/30 bg-primary/10 p-5">
+        <div className="mt-4 rounded-lg border border-primary/30 bg-primary/10 p-4">
           <div className="flex flex-wrap items-start gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <ShieldCheck className="size-5" />
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <ShieldCheck className="size-4" />
             </span>
             <div>
-              <h3 className="font-semibold">Bring Your Own AI</h3>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
+              <h3 className="text-sm font-semibold">Bring Your Own AI</h3>
+              <p className="mt-1.5 max-w-4xl text-xs leading-5 text-muted-foreground">
                 Enterprise teams can use their existing AI subscriptions, reduce vendor lock-in, control AI usage, and align with internal security policies.
               </p>
             </div>
@@ -6876,13 +6876,15 @@ function LandingPage({
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {workflowSteps.map((step, index) => (
               <div key={step.title} className="relative rounded-lg border border-border/40 bg-background/50 p-3.5">
-                <div className="mb-2 flex items-start gap-2.5">
+                <div className="flex items-start gap-2.5">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
                     {index + 1}
                   </span>
-                  <h3 className="min-w-0 text-sm font-semibold leading-5">{step.title}</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold leading-5">{step.title}</h3>
+                    <p className="mt-2 text-xs leading-4 text-muted-foreground">{step.description}</p>
+                  </div>
                 </div>
-                <p className="text-xs leading-4 text-muted-foreground">{step.description}</p>
               </div>
             ))}
           </div>
