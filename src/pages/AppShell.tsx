@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Clock,
+  Cloud,
   Database,
   Code2,
   ClipboardCheck,
@@ -50,6 +52,7 @@ import {
   UserCircle,
   Puzzle,
   ExternalLink,
+  Monitor,
 } from "lucide-react";
 import {
   Area,
@@ -2310,6 +2313,113 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
     <div className="min-w-0 rounded-lg border border-border/40 bg-surface/40 p-3">
       <p className="truncate text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 break-words font-display text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function formatValidationDuration(durationMs?: number) {
+  const totalSeconds = Math.max(0, Math.round((durationMs ?? 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} seconds`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes} min${minutes > 1 ? "s" : ""}${seconds ? ` ${seconds} sec` : ""}`;
+}
+
+function formatValidationMode(mode?: RepositoryValidationMode) {
+  if (!mode) return "Quick";
+  return `${mode[0].toUpperCase()}${mode.slice(1)}`;
+}
+
+function normalizeValidationBrowser(run?: RepositoryValidationRun | null) {
+  const browser = run?.browser?.trim();
+  if (browser && !/github actions|local runner|backend/i.test(browser)) return browser;
+  const source = [
+    run?.command,
+    run?.logs,
+    run?.stdout,
+    ...(run?.validationDebugLogs ?? []).flatMap((step) => [step.command, step.stdout, step.stderr]),
+  ].filter(Boolean).join("\n");
+  const match = source.match(/(?:Browser|VALIDATION_BROWSER)[:=]\s*(chromium|firefox|webkit|all)/i);
+  if (match?.[1]) return match[1].toLowerCase();
+  return run?.validationProvider === "github-actions" ? "chromium" : browser || "-";
+}
+
+function validationProviderLabel(provider?: RepositoryValidationRun["validationProvider"]) {
+  if (provider === "github-actions") return "GitHub Actions";
+  if (provider === "local-runner") return "Local Runner";
+  if (provider === "backend-fallback") return "Local Runner Fallback";
+  return "-";
+}
+
+function validationStatusClass(status?: string) {
+  const normalized = status?.toLowerCase();
+  if (normalized === "passed" || normalized === "success") return "border-success/30 bg-success/10 text-success";
+  if (normalized === "running" || normalized === "pending") return "border-primary/30 bg-primary/10 text-primary";
+  if (normalized === "queued") return "border-muted-foreground/30 bg-muted text-muted-foreground";
+  if (normalized === "cancelled" || normalized === "canceled") return "border-warning/30 bg-warning/10 text-warning";
+  if (normalized === "failed" || normalized === "failure") return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (normalized === "error") return "border-red-950 bg-red-950/10 text-red-900";
+  return "border-border/60 bg-card text-muted-foreground";
+}
+
+function CopyableValue({ label, value, href }: { label: string; value?: string | number | null; href?: string }) {
+  const hasValue = Boolean(value && String(value) !== "-");
+  const displayValue = hasValue ? String(value) : "-";
+  const copy = async () => {
+    if (!hasValue) return;
+    await navigator.clipboard.writeText(String(value));
+    toast.success(`${label} copied`);
+  };
+  return (
+    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="mt-1 flex items-center gap-2">
+        {href && hasValue ? (
+          <a className="min-w-0 flex-1 truncate font-mono text-sm font-semibold text-primary underline-offset-4 hover:underline" href={href} target="_blank" rel="noreferrer">
+            {displayValue}
+          </a>
+        ) : (
+          <p className="min-w-0 flex-1 truncate font-mono text-sm font-semibold">{displayValue}</p>
+        )}
+        {hasValue ? (
+          <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={copy} aria-label={`Copy ${label}`}>
+            <Copy className="size-3.5" />
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ValidationMetricCard({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: typeof Wand2;
+  label: string;
+  value: string | number;
+  tone?: "success" | "danger" | "warning" | "primary" | "muted";
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-border/40 bg-card/80 p-4 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className={cn(
+          "flex size-10 shrink-0 items-center justify-center rounded-lg border",
+          tone === "success" && "border-success/30 bg-success/10 text-success",
+          tone === "danger" && "border-destructive/30 bg-destructive/10 text-destructive",
+          tone === "warning" && "border-warning/30 bg-warning/10 text-warning",
+          tone === "primary" && "border-primary/30 bg-primary/10 text-primary",
+          (!tone || tone === "muted") && "border-border/40 bg-surface/60 text-muted-foreground",
+        )}>
+          <Icon className="size-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
+          <p className="mt-1 break-words font-display text-lg font-semibold">{value}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4782,8 +4892,29 @@ function RepositoryActivityPanel({
   const validationTestExecutionDuration = validationStageDurations
     .filter((stage) => stage.stage === "Test execution")
     .reduce((sum, stage) => sum + stage.duration, 0);
+  const validationBrowser = normalizeValidationBrowser(validationRun);
+  const validationProvider = validationProviderLabel(validationRun?.validationProvider);
+  const validationRepoUrl = validationRun?.workflowRunUrl?.split("/actions/runs/")[0] ?? "";
+  const validationRepository = validationRepoUrl ? validationRepoUrl.replace("https://github.com/", "") : "-";
+  const validationBranchUrl = validationRepoUrl && validationRun?.validationBranchName
+    ? `${validationRepoUrl}/tree/${encodeURIComponent(validationRun.validationBranchName)}`
+    : undefined;
+  const validationProgressStages = ["Queued", "Preparing Runner", "Installing Dependencies", "Installing Browsers", "Running Tests", "Uploading Reports", "Completed"];
   const recommendationBlocksPr = validationRecommendation?.releaseRecommendation === "Do Not Merge";
   const recommendationWarnsPr = validationRecommendation?.releaseRecommendation === "Merge with Caution";
+  const downloadValidationJson = () => {
+    if (!validationRun?.jsonReportData) {
+      toast.info("JSON report is not available yet.");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(validationRun.jsonReportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `aiqa-validation-${validationRun.id}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     if (!activeActivity) {
@@ -5402,41 +5533,68 @@ function RepositoryActivityPanel({
                           <p className="font-semibold">Validation</p>
                           <p className="mt-1 text-sm text-muted-foreground">Validation runs against approved proposed updates before PR creation.</p>
                         </div>
-                        {validationRun && <Badge variant="outline">{validationRun.status}</Badge>}
+                        {validationRun && (
+                          <Badge variant="outline" className={validationStatusClass(validationRun.status)}>
+                            {validationRun.status}
+                          </Badge>
+                        )}
                       </div>
                       {validationRun ? (
                         <div className="mt-4 space-y-3">
-                          <div className={cn(
-                            "rounded-lg border p-3 text-sm",
-                            validationInProgress
-                              ? "border-primary/30 bg-primary/10 text-primary"
-                              : validationPassed
-                                ? "border-success/30 bg-success/10 text-success"
-                                : "border-destructive/30 bg-destructive/10 text-destructive",
-                          )}>
+                          <div className={cn("rounded-xl border p-4 text-sm", validationStatusClass(validationRun.status))}>
                             {validationInProgress
                               ? validationRun.validationProvider === "github-actions"
                                 ? "Validation is running in GitHub Actions. AI QA Copilot created a validation branch, pushed approved updates, and is polling the workflow result."
                                 : "Validation is running. AI QA Copilot is preparing the automation repository, applying approved updates, and executing Playwright tests."
                               : validationPassed
-                                ? "Validation passed. Approved Playwright updates are ready for pull request review."
-                                : "Validation completed with failures. Review the error details before creating a pull request."}
+                                ? (
+                                  <div>
+                                    <p className="font-semibold">Validation completed successfully.</p>
+                                    <p className="mt-1">All Playwright tests passed.</p>
+                                    <p className="mt-1">The generated automation is ready for pull request review.</p>
+                                  </div>
+                                )
+                                : "Validation completed with failures. Review the failed tests, logs, and AI recommendation before creating a pull request."}
                           </div>
-                          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
-                            <MiniStat label="Status" value={validationRun.status} />
-                            <MiniStat label="Total" value={String(validationRun.totalTests)} />
-                            <MiniStat label="Passed" value={String(validationRun.passed)} />
-                            <MiniStat label="Failed" value={String(validationRun.failed)} />
-                            <MiniStat label="Skipped" value={String(validationRun.skipped)} />
-                            <MiniStat label="Duration" value={`${Math.round(validationRun.duration / 1000)}s`} />
-                            <MiniStat label="Browser" value={validationRun.browser || "-"} />
-                            <MiniStat label="Environment" value={validationRun.environment || "-"} />
-                            <MiniStat label="Mode" value={validationRun.validationMode ? `${validationRun.validationMode[0].toUpperCase()}${validationRun.validationMode.slice(1)}` : "-"} />
+                          {validationInProgress ? (
+                            <div className="rounded-lg border border-border/40 bg-card/70 p-4">
+                              <p className="font-semibold">Validation Progress</p>
+                              <div className="mt-4 grid gap-2 md:grid-cols-7">
+                                {validationProgressStages.map((stage, index) => {
+                                  const completedIndex = validationRun.validationStageTimings?.filter((item) => item.status === "Passed" || item.status === "Skipped").length ?? 0;
+                                  const isActive = index === Math.min(completedIndex, validationProgressStages.length - 1);
+                                  const isDone = index < completedIndex;
+                                  return (
+                                    <div key={stage} className={cn(
+                                      "rounded-lg border p-2 text-center text-xs font-semibold",
+                                      isDone && "border-success/30 bg-success/10 text-success",
+                                      isActive && !isDone && "border-primary/30 bg-primary/10 text-primary",
+                                      !isDone && !isActive && "border-border/40 bg-surface/40 text-muted-foreground",
+                                    )}>
+                                      {stage}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <ValidationMetricCard icon={ShieldCheck} label="Status" value={validationRun.status} tone={validationPassed ? "success" : validationInProgress ? "primary" : validationRun.failed > 0 ? "danger" : "muted"} />
+                            <ValidationMetricCard icon={ListChecks} label="Total Tests" value={String(validationRun.totalTests)} />
+                            <ValidationMetricCard icon={CheckCircle2} label="Passed" value={String(validationRun.passed)} tone="success" />
+                            <ValidationMetricCard icon={XCircle} label="Failed" value={String(validationRun.failed)} tone={validationRun.failed > 0 ? "danger" : "muted"} />
+                            <ValidationMetricCard icon={AlertTriangle} label="Skipped" value={String(validationRun.skipped)} tone={validationRun.skipped > 0 ? "warning" : "muted"} />
+                            <ValidationMetricCard icon={Clock} label="Duration" value={formatValidationDuration(validationRun.duration)} />
+                            <ValidationMetricCard icon={Monitor} label="Browser" value={validationBrowser} />
+                            <ValidationMetricCard icon={Database} label="Environment" value={validationRun.environment || "-"} />
+                            <ValidationMetricCard icon={Gauge} label="Validation Mode" value={formatValidationMode(validationRun.validationMode)} tone="primary" />
+                            <ValidationMetricCard icon={Cloud} label="Validation Provider" value={validationProvider} tone="primary" />
                           </div>
-                          <div className="grid gap-3 md:grid-cols-3">
-                            <MiniStat label="Validation Provider" value={validationRun.validationProvider === "github-actions" ? "GitHub Actions" : validationRun.validationProvider === "backend-fallback" || validationRun.validationProvider === "local-runner" ? "Local runner fallback" : "-"} />
-                            <MiniStat label="Validation Branch" value={validationRun.validationBranchName || "-"} />
-                            <MiniStat label="Workflow Conclusion" value={validationRun.workflowConclusion || "-"} />
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <CopyableValue label="Repository" value={validationRepository} href={validationRepoUrl || undefined} />
+                            <CopyableValue label="Validation Branch" value={validationRun.validationBranchName || "-"} href={validationBranchUrl} />
+                            <CopyableValue label="Workflow Run ID" value={validationRun.workflowRunId ? String(validationRun.workflowRunId) : "-"} href={validationRun.workflowRunUrl} />
+                            <CopyableValue label="Workflow URL" value={validationRun.workflowRunUrl || "-"} href={validationRun.workflowRunUrl} />
                           </div>
                           {validationRun.validationProvider === "github-actions" ? (
                             <div className="rounded-lg border border-border/40 bg-card/70 p-4">
@@ -5445,17 +5603,47 @@ function RepositoryActivityPanel({
                                   <p className="font-semibold">GitHub Actions Workflow</p>
                                   <p className="mt-1 text-sm text-muted-foreground">Validation is executed in the connected automation repository, not on the Render backend.</p>
                                 </div>
-                                {validationRun.workflowRunUrl ? (
-                                  <a
-                                    className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
-                                    href={validationRun.workflowRunUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  >
-                                    <ExternalLink className="size-4" />
-                                    Open workflow
-                                  </a>
-                                ) : null}
+                                <div className="flex flex-wrap gap-2">
+                                  {validationRun.workflowRunUrl ? (
+                                    <a
+                                      className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                                      href={validationRun.workflowRunUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      <ExternalLink className="size-4" />
+                                      Open Workflow
+                                    </a>
+                                  ) : null}
+                                  {validationBranchUrl ? (
+                                    <a
+                                      className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                                      href={validationBranchUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      <GitBranch className="size-4" />
+                                      Open Branch
+                                    </a>
+                                  ) : null}
+                                  {validationRun.reportUrl ? (
+                                    <a
+                                      className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-1.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                                      href={validationRun.reportUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      <ExternalLink className="size-4" />
+                                      View HTML Report
+                                    </a>
+                                  ) : (
+                                    <Badge variant="outline" className="bg-card">HTML report will be available after successful report generation.</Badge>
+                                  )}
+                                  <Button variant="outline" size="sm" onClick={downloadValidationJson} disabled={!validationRun.jsonReportData}>
+                                    <Download className="size-4" />
+                                    Download JSON Report
+                                  </Button>
+                                </div>
                               </div>
                               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                 <MiniStat label="Workflow Run ID" value={validationRun.workflowRunId ? String(validationRun.workflowRunId) : "-"} />
@@ -5472,17 +5660,16 @@ function RepositoryActivityPanel({
                                   <p className="font-semibold">Validation Performance</p>
                                   <p className="mt-1 text-sm text-muted-foreground">Stage timing from GitHub Actions validation.</p>
                                 </div>
-                                <Badge variant="outline">{Math.round(validationRun.duration / 1000)}s total</Badge>
+                                <Badge variant="outline">{formatValidationDuration(validationRun.duration)} total</Badge>
                               </div>
                               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                 <MiniStat label="Cache Hit" value={validationCacheHit ? "Yes" : "No / warming"} />
                                 <MiniStat label="Browser Install" value={validationBrowserInstallSkipped ? "Skipped" : "Installed"} />
-                                <MiniStat label="Test Execution" value={`${Math.round(validationTestExecutionDuration / 1000)}s`} />
+                                <MiniStat label="Test Execution" value={formatValidationDuration(validationTestExecutionDuration)} />
                                 <MiniStat label="Mode" value={validationRun.validationMode ?? "quick"} />
                               </div>
                               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {validationRun.validationStageTimings.map((stage, index) => {
-                                  const seconds = Math.max(0, Math.round(stage.duration / 1000));
                                   const percent = Math.min(100, Math.max(8, validationRun.duration ? Math.round((stage.duration / validationRun.duration) * 100) : 8));
                                   return (
                                     <div key={`${stage.stage}-${index}`} className="rounded-lg border border-border/40 bg-surface/50 p-3">
@@ -5502,7 +5689,7 @@ function RepositoryActivityPanel({
                                       <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
                                         <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
                                       </div>
-                                      <p className="mt-2 text-xs text-muted-foreground">{seconds}s</p>
+                                      <p className="mt-2 text-xs text-muted-foreground">{formatValidationDuration(stage.duration)}</p>
                                     </div>
                                   );
                                 })}
@@ -5533,7 +5720,7 @@ function RepositoryActivityPanel({
                                 View HTML Report
                               </a>
                             ) : (
-                              <Badge variant="outline" className="ml-auto">HTML report available in backend artifacts when generated</Badge>
+                              <Badge variant="outline" className="ml-auto">HTML report will be available after successful report generation.</Badge>
                             )}
                           </div>
                           {validationRun.failedTestNames?.length ? (
@@ -5562,7 +5749,7 @@ function RepositoryActivityPanel({
                                       <td className="max-w-[180px] break-words px-3 py-2 font-mono text-xs">{test.testFile}</td>
                                       <td className="px-3 py-2 font-medium">{test.testName}</td>
                                       <td className="max-w-sm break-words px-3 py-2 text-destructive">{test.errorMessage}</td>
-                                      <td className="px-3 py-2">{Math.round(test.duration / 1000)}s</td>
+                                      <td className="px-3 py-2">{formatValidationDuration(test.duration)}</td>
                                       <td className="px-3 py-2 text-muted-foreground">{test.suggestedAction}</td>
                                     </tr>
                                   ))}
