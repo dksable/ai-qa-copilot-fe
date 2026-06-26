@@ -1,4 +1,4 @@
-import { Beaker, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -13,9 +13,6 @@ export function SidebarHeader({
 }) {
   return (
     <div className="flex h-16 items-center gap-3 border-b border-border/40 px-4">
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-primary shadow-glow">
-        <Beaker className="size-5 text-primary-foreground" />
-      </div>
       {(!isCollapsed || mobile) && (
         <div className="min-w-0">
           <p className="truncate font-display text-base font-semibold">AI QA Copilot</p>

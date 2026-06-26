@@ -432,6 +432,7 @@ export type RepositoryImpactSuggestionCategory =
   | "UI";
 export type RepositoryGeneratedTestUpdateStatus = "Pending" | "Approved" | "Rejected" | "Edited";
 export type RepositoryValidationRunStatus = "Pending" | "Running" | "Passed" | "Failed" | "Cancelled" | "Completed" | "Error";
+export type RepositoryValidationMode = "quick" | "impact" | "full";
 export type RepositoryUpdatePullRequestStatus = "Created" | "Failed";
 export type RepositoryValidationReleaseRecommendation = "Safe to Merge" | "Merge with Caution" | "Do Not Merge";
 export type RepositoryValidationMergeDecision = "Approved" | "Warning" | "Blocked";
@@ -525,6 +526,7 @@ export interface RepositoryValidationRun {
   duration: number;
   browser: string;
   environment: string;
+  validationMode?: RepositoryValidationMode;
   command?: string;
   logs: string;
   stdout?: string;
@@ -1786,8 +1788,11 @@ export const projectApi = {
     }),
   regenerateRepositoryTestUpdate: (updateId: string) =>
     apiRequest<RepositoryGeneratedTestUpdate>(`/api/integrations/github/test-updates/${updateId}/regenerate`, { method: "POST" }),
-  runRepositoryUpdateValidation: (impactAnalysisId: string) =>
-    apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/run-validation`, { method: "POST" }),
+  runRepositoryUpdateValidation: (impactAnalysisId: string, input?: { validationMode?: RepositoryValidationMode; browser?: string }) =>
+    apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/run-validation`, {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    }),
   getRepositoryUpdateValidation: (impactAnalysisId: string) =>
     apiRequest<RepositoryValidationRun>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/validation-result`),
   generateRepositoryValidationRecommendation: (impactAnalysisId: string) =>

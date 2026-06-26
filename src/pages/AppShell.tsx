@@ -151,6 +151,7 @@ import {
   type RepositoryImpactAnalysis,
   type RepositoryImpactAnalysisStatus,
   type RepositoryGeneratedTestUpdate,
+  type RepositoryValidationMode,
   type RepositoryValidationRun,
   type RepositoryValidationRecommendation,
   type ReleaseReadinessSnapshot,
@@ -4760,6 +4761,7 @@ function RepositoryActivityPanel({
   const [failureAnalysis, setFailureAnalysis] = useState<ValidationFailureAnalysis | null>(null);
   const [autoFixes, setAutoFixes] = useState<ValidationAutoFix[]>([]);
   const [retryAttempts, setRetryAttempts] = useState<ValidationRetryAttempt[]>([]);
+  const [validationMode, setValidationMode] = useState<RepositoryValidationMode>("quick");
   const [isUpdateGenerating, setIsUpdateGenerating] = useState(false);
   const [isValidationRunning, setIsValidationRunning] = useState(false);
   const [isRecommendationLoading, setIsRecommendationLoading] = useState(false);
@@ -4774,6 +4776,12 @@ function RepositoryActivityPanel({
   const hasApprovedOrEditedUpdates = approvedOrEditedUpdates.length > 0;
   const validationPassed = validationRun?.status === "Passed" && validationRun.failed === 0;
   const validationInProgress = isValidationRunning || validationRun?.status === "Running" || validationRun?.status === "Pending";
+  const validationStageDurations = validationRun?.validationStageTimings ?? [];
+  const validationCacheHit = validationRun?.validationDebugLogs?.some((step) => /cache hit:\s*true/i.test(`${step.stdout}\n${step.stderr}`)) ?? false;
+  const validationBrowserInstallSkipped = validationRun?.validationDebugLogs?.some((step) => /skipping browser download|browser cache restored/i.test(`${step.stdout}\n${step.stderr}`)) ?? false;
+  const validationTestExecutionDuration = validationStageDurations
+    .filter((stage) => stage.stage === "Test execution")
+    .reduce((sum, stage) => sum + stage.duration, 0);
   const recommendationBlocksPr = validationRecommendation?.releaseRecommendation === "Do Not Merge";
   const recommendationWarnsPr = validationRecommendation?.releaseRecommendation === "Merge with Caution";
 
@@ -4904,7 +4912,10 @@ function RepositoryActivityPanel({
 
     try {
       setIsValidationRunning(true);
-      const startedRun = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id);
+      const startedRun = await projectApi.runRepositoryUpdateValidation(impactAnalysis.id, {
+        validationMode,
+        browser: "chromium",
+      });
       setValidationRun(startedRun);
       setValidationRecommendation(null);
       setFailureAnalysis(null);
@@ -5274,6 +5285,16 @@ function RepositoryActivityPanel({
                             <Eye className="size-4" />
                             View PR Preview
                           </Button>
+                          <Select value={validationMode} onValueChange={(value) => setValidationMode(value as RepositoryValidationMode)}>
+                            <SelectTrigger className="h-10 w-[172px] bg-card">
+                              <SelectValue placeholder="Validation mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="quick">Quick Validation</SelectItem>
+                              <SelectItem value="impact">Impact Validation</SelectItem>
+                              <SelectItem value="full">Full Validation</SelectItem>
+                            </SelectContent>
+                          </Select>
                           <Button variant="outline" onClick={runValidation} disabled={!hasApprovedOrEditedUpdates || validationInProgress}>
                             {validationInProgress ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
                             Run Validation
@@ -5361,6 +5382,7 @@ function RepositoryActivityPanel({
                             <MiniStat label="Duration" value={`${Math.round(validationRun.duration / 1000)}s`} />
                             <MiniStat label="Browser" value={validationRun.browser || "-"} />
                             <MiniStat label="Environment" value={validationRun.environment || "-"} />
+                            <MiniStat label="Mode" value={validationRun.validationMode ? `${validationRun.validationMode[0].toUpperCase()}${validationRun.validationMode.slice(1)}` : "-"} />
                           </div>
                           <div className="grid gap-3 md:grid-cols-3">
                             <MiniStat label="Validation Provider" value={validationRun.validationProvider === "github-actions" ? "GitHub Actions" : validationRun.validationProvider === "backend-fallback" || validationRun.validationProvider === "local-runner" ? "Local runner fallback" : "-"} />
@@ -5402,6 +5424,12 @@ function RepositoryActivityPanel({
                                   <p className="mt-1 text-sm text-muted-foreground">Stage timing from GitHub Actions validation.</p>
                                 </div>
                                 <Badge variant="outline">{Math.round(validationRun.duration / 1000)}s total</Badge>
+                              </div>
+                              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                <MiniStat label="Cache Hit" value={validationCacheHit ? "Yes" : "No / warming"} />
+                                <MiniStat label="Browser Install" value={validationBrowserInstallSkipped ? "Skipped" : "Installed"} />
+                                <MiniStat label="Test Execution" value={`${Math.round(validationTestExecutionDuration / 1000)}s`} />
+                                <MiniStat label="Mode" value={validationRun.validationMode ?? "quick"} />
                               </div>
                               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {validationRun.validationStageTimings.map((stage, index) => {
