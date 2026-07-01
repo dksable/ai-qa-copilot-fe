@@ -59,6 +59,7 @@ export const NAV_ITEMS: NavigationItem[] = [
       { label: "Release Readiness", value: "repository-release-readiness", icon: BarChart3, description: "Release decision dashboard" },
     ],
   },
+  { label: "Validation", value: "repository-validation-history", icon: ShieldCheck, description: "Runs and AI recommendations" },
   { label: "Manual Test Execution", value: "execution", icon: PlayCircle, description: "Manual test runs" },
   { label: "Analytics", value: "analytics", icon: BarChart3, description: "Coverage and productivity" },
   { label: "Team Workspace", value: "workspace", icon: Users, description: "Members and roles" },

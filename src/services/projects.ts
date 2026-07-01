@@ -536,7 +536,73 @@ export interface RepositoryGeneratedTestUpdate {
     potentialRisks: string[];
     recommendations: string[];
   };
+  repositoryLearningUsed?: {
+    locatorStrategy: string;
+    pageObjectModel: boolean;
+    testStyle: string;
+    namingPattern: string;
+    repositoryMatchScore: number;
+    overallConfidence: number;
+  };
   createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepositoryLearningProfile {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId: string;
+  repositoryName: string;
+  branch?: string;
+  framework: string;
+  frameworkVersion?: string;
+  language: string;
+  packageManager: string;
+  testDirectories: string[];
+  pageObjectDirectories: string[];
+  fixtureDirectories: string[];
+  helperDirectories: string[];
+  locatorPreferences: Array<{ strategy: string; weight: number; source: string }>;
+  namingPatterns: {
+    testFilePattern: string;
+    describePattern: string;
+    testCasePattern: string;
+    pageObjectPattern: string;
+    fixturePattern: string;
+    helperPattern: string;
+    folderPattern: string;
+  };
+  testStylePatterns: {
+    importStyle: string;
+    describeStructure: string;
+    beforeEachPattern: string;
+    fixtureUsage: string;
+    pageObjectUsage: string;
+    assertionStyle: string;
+    navigationStyle: string;
+    dataSetupStyle: string;
+    cleanupStyle: string;
+    commentsStyle: string;
+  };
+  authPatterns: string[];
+  commonFlows: string[];
+  acceptedGenerationCount: number;
+  rejectedGenerationCount: number;
+  editedGenerationCount: number;
+  validationPassCount: number;
+  validationFailCount: number;
+  repositoryMatchScore: number;
+  locatorConfidence: number;
+  assertionConfidence: number;
+  namingConfidence: number;
+  businessFlowConfidence: number;
+  validationConfidence: number;
+  overallConfidence: number;
+  aiConfidenceTrend: Array<{ date: string; score: number; event: string }>;
+  lastAnalyzedCommit?: string;
+  lastAnalyzedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1353,6 +1419,83 @@ export interface AnalyticsExports {
   approvedVsDraftExportCount: Array<{ name: string; value: number }>;
 }
 
+export interface AIQualityFilters extends AnalyticsFilters {
+  repositoryId?: string;
+  aiProvider?: string;
+  validationMode?: RepositoryValidationMode | string;
+}
+
+export interface AIQualitySummary {
+  overallQualityScore: number;
+  qualityLabel: "Enterprise Ready" | "Excellent" | "Good" | "Needs Improvement" | "Low Quality";
+  requirementCoverage: number;
+  repositoryMatchScore: number;
+  testGenerationAccuracy: number;
+  validationSuccessRate: number;
+  manualEditRate: number;
+  manualEditScore: number;
+  userAcceptanceRate: number;
+  aiConfidenceScore: number;
+  totalGeneratedOutputs: number;
+  acceptedOutputs: number;
+  rejectedOutputs: number;
+  editedOutputs: number;
+  validationPassed: number;
+  validationFailed: number;
+  qualityDistribution: Array<{ name: string; value: number }>;
+  improvementSuggestions: string[];
+}
+
+export interface AIQualityTrendPoint {
+  date: string;
+  qualityScore: number;
+  aiConfidenceScore: number;
+  requirementCoverage: number;
+  repositoryMatchScore: number;
+  validationSuccessRate: number;
+  manualEditRate: number;
+  userAcceptanceRate: number;
+}
+
+export interface AIQualityMetric {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId?: string;
+  generatedOutputId: string;
+  requirementId?: string;
+  validationRunId?: string;
+  aiProvider: string;
+  aiModel: string;
+  requirementCoverage: number;
+  repositoryMatchScore: number;
+  testGenerationAccuracy: number;
+  validationSuccessRate: number;
+  manualEditRate: number;
+  manualEditScore: number;
+  userAcceptanceRate: number;
+  aiConfidenceScore: number;
+  overallQualityScore: number;
+  qualityLabel: AIQualitySummary["qualityLabel"];
+  generatedLines: number;
+  editedLines: number;
+  accepted: boolean;
+  rejected: boolean;
+  regenerated: boolean;
+  validationPassed: boolean;
+  validationFailed: boolean;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface AIQualityGeneratedOutputDetail {
+  metric: AIQualityMetric;
+  outputType: string;
+  title: string;
+  validationResult: RepositoryValidationRun | null;
+  improvementSuggestions: string[];
+}
+
 export interface CreateProjectInput {
   name: string;
   description: string;
@@ -1422,6 +1565,15 @@ function analyticsQueryString(filters: AnalyticsFilters) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params.set(key, value);
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function aiQualityQueryString(filters: AIQualityFilters) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, String(value));
   });
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -1739,6 +1891,20 @@ export const projectApi = {
     }),
   getGitHubAutomationConfig: (workspaceId: string) =>
     apiRequest<GitHubAutomationConfig | null>(`/api/integrations/github/config?workspaceId=${encodeURIComponent(workspaceId)}`),
+  getRepositoryLearning: (repositoryId: string) =>
+    apiRequest<RepositoryLearningProfile>(`/api/repositories/${repositoryId}/learning`),
+  refreshRepositoryLearning: (repositoryId: string) =>
+    apiRequest<RepositoryLearningProfile>(`/api/repositories/${repositoryId}/learning/refresh`, { method: "POST" }),
+  resetRepositoryLearning: (repositoryId: string) =>
+    apiRequest<{ reset: boolean }>(`/api/repositories/${repositoryId}/learning`, { method: "DELETE" }),
+  sendRepositoryLearningFeedback: (
+    repositoryId: string,
+    input: { action: "Approved" | "Rejected" | "Edited" | "Regenerated" | "Validation Passed" | "Validation Failed"; locatorStrategy?: string; confidenceDelta?: number },
+  ) =>
+    apiRequest<RepositoryLearningProfile>(`/api/repositories/${repositoryId}/learning/feedback`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   connectGitHubAutomation: (input: SaveGitHubAutomationConfigInput) =>
     apiRequest<GitHubAutomationConfig>("/api/integrations/github/connect", {
       method: "POST",
@@ -1947,6 +2113,21 @@ export const projectApi = {
     apiRequest<AnalyticsAIUsage>(`/api/analytics/ai-usage${analyticsQueryString(filters)}`),
   getAnalyticsExports: (filters: AnalyticsFilters = {}) =>
     apiRequest<AnalyticsExports>(`/api/analytics/exports${analyticsQueryString(filters)}`),
+  getAIQualitySummary: (filters: AIQualityFilters = {}) =>
+    apiRequest<AIQualitySummary>(`/api/ai-quality/summary${aiQualityQueryString(filters)}`),
+  getAIQualityProject: (projectId: string, filters: AIQualityFilters = {}) =>
+    apiRequest<AIQualitySummary>(`/api/ai-quality/project/${projectId}${aiQualityQueryString(filters)}`),
+  getAIQualityRepository: (repositoryId: string, filters: AIQualityFilters = {}) =>
+    apiRequest<AIQualitySummary>(`/api/ai-quality/repository/${repositoryId}${aiQualityQueryString(filters)}`),
+  getAIQualityTrends: (filters: AIQualityFilters = {}) =>
+    apiRequest<AIQualityTrendPoint[]>(`/api/ai-quality/trends${aiQualityQueryString(filters)}`),
+  getAIQualityGeneratedOutput: (outputId: string) =>
+    apiRequest<AIQualityGeneratedOutputDetail>(`/api/ai-quality/generated-output/${outputId}`),
+  recalculateAIQuality: (filters: AIQualityFilters = {}) =>
+    apiRequest<{ recalculated: number; summary: AIQualitySummary }>("/api/ai-quality/recalculate", {
+      method: "POST",
+      body: JSON.stringify(filters),
+    }),
   listApprovedTestCaseVersions: (filters: { projectId?: string; moduleId?: string; requirementId?: string } = {}) =>
     apiRequest<ApprovedTestCaseVersion[]>(`/api/approved-test-case-versions${executionQueryString(filters)}`),
   createTestRun: (input: CreateTestRunInput) =>

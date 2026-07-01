@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Sparkles,
   Brain,
@@ -53,6 +53,7 @@ import {
   Puzzle,
   ExternalLink,
   Monitor,
+  Keyboard,
 } from "lucide-react";
 import {
   Area,
@@ -123,6 +124,8 @@ import {
   type AnalyticsReview,
   type AnalyticsSummary,
   type AnalyticsUserProductivity,
+  type AIQualitySummary,
+  type AIQualityTrendPoint,
   type AIProviderConfig,
   type AIProviderFeatureMapping,
   type AIProviderFeatureName,
@@ -154,6 +157,7 @@ import {
   type RepositoryImpactAnalysis,
   type RepositoryImpactAnalysisStatus,
   type RepositoryGeneratedTestUpdate,
+  type RepositoryLearningProfile,
   type RepositoryValidationMode,
   type RepositoryValidationRun,
   type RepositoryValidationRecommendation,
@@ -222,6 +226,8 @@ interface AnalyticsBundle {
   userProductivity: AnalyticsUserProductivity[];
   aiUsage: AnalyticsAIUsage;
   exports: AnalyticsExports;
+  aiQuality: AIQualitySummary;
+  aiQualityTrends: AIQualityTrendPoint[];
 }
 
 export default function AppShell() {
@@ -294,7 +300,109 @@ export default function AppShell() {
   const [isPushingPlaywright, setIsPushingPlaywright] = useState(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+  const lastShortcutPrefixRef = useRef<{ key: string; time: number } | null>(null);
   const isAuthenticated = Boolean(auth?.user);
+
+  const globalSearchItems = useMemo(() => {
+    const items: Array<{ group: string; title: string; description: string; view: ActiveView; icon: typeof Search }> = [];
+    projects.forEach((project) => items.push({
+      group: "Projects",
+      title: project.name,
+      description: `${project.domain} / ${project.totalRequirements} requirements`,
+      view: "projects",
+      icon: FolderKanban,
+    }));
+    projectDetail?.requirements.forEach((requirementItem) => items.push({
+      group: "Requirements",
+      title: requirementItem.title,
+      description: requirementItem.description || "Project requirement",
+      view: "generator",
+      icon: FileText,
+    }));
+    allHistory.slice(0, 80).forEach((history) => items.push({
+      group: "Test History",
+      title: history.requirementTitle,
+      description: `Version ${history.version} / ${history.coverageScore}% coverage`,
+      view: "history",
+      icon: History,
+    }));
+    repositoryActivities.slice(0, 80).forEach((activity) => items.push({
+      group: "Repository Activity",
+      title: `${activity.repoOwner}/${activity.repoName}`,
+      description: `${activity.eventType} / ${activity.branch || "branch"} / ${activity.fileCount} files`,
+      view: "repository-activity",
+      icon: GitBranch,
+    }));
+    workspaceDetail?.members.forEach((member) => items.push({
+      group: "Team Members",
+      title: member.name,
+      description: `${member.email} / ${member.role}`,
+      view: "workspace",
+      icon: Users,
+    }));
+    return items;
+  }, [allHistory, projectDetail?.requirements, projects, repositoryActivities, workspaceDetail?.members]);
+
+  const filteredSearchItems = useMemo(() => {
+    const query = globalSearchQuery.trim().toLowerCase();
+    if (!query) return globalSearchItems.slice(0, 12);
+    return globalSearchItems
+      .filter((item) => `${item.group} ${item.title} ${item.description}`.toLowerCase().includes(query))
+      .slice(0, 24);
+  }, [globalSearchItems, globalSearchQuery]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+      if (isTyping || target?.isContentEditable) return;
+      if (event.key === "/") {
+        event.preventDefault();
+        setIsGlobalSearchOpen(true);
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setIsShortcutHelpOpen(true);
+        return;
+      }
+      if (event.key === "Escape") {
+        setIsGlobalSearchOpen(false);
+        setIsShortcutHelpOpen(false);
+        return;
+      }
+      const nowTime = Date.now();
+      const prefix = lastShortcutPrefixRef.current;
+      if (event.key === "g" || event.key === "n") {
+        lastShortcutPrefixRef.current = { key: event.key, time: nowTime };
+        return;
+      }
+      if (prefix && nowTime - prefix.time < 1200) {
+        const shortcut = `${prefix.key} ${event.key}`;
+        const routes: Record<string, ActiveView> = {
+          "g d": "dashboard",
+          "g p": "projects",
+          "g r": "repository-activity",
+          "g v": "repository-validation-history",
+          "g a": "analytics",
+          "n p": "projects",
+          "n t": "generator",
+        };
+        const nextView = routes[shortcut];
+        if (nextView) {
+          event.preventDefault();
+          setActiveView(nextView);
+          if (shortcut === "n p") setIsProjectDialogOpen(true);
+        }
+        lastShortcutPrefixRef.current = null;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const refreshProjects = async (projectId = selectedProjectId) => {
     try {
@@ -452,6 +560,8 @@ export default function AppShell() {
         userProductivity,
         aiUsage,
         exports,
+        aiQuality,
+        aiQualityTrends,
       ] = await Promise.all([
         projectApi.getAnalyticsSummary(filters),
         projectApi.getAnalyticsCoverage(filters),
@@ -461,8 +571,10 @@ export default function AppShell() {
         projectApi.getAnalyticsUsersProductivity(filters),
         projectApi.getAnalyticsAIUsage(filters),
         projectApi.getAnalyticsExports(filters),
+        projectApi.getAIQualitySummary(filters),
+        projectApi.getAIQualityTrends(filters),
       ]);
-      setAnalytics({ summary, coverage, generation, review, projectHealth, userProductivity, aiUsage, exports });
+      setAnalytics({ summary, coverage, generation, review, projectHealth, userProductivity, aiUsage, exports, aiQuality, aiQualityTrends });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load analytics");
     } finally {
@@ -723,6 +835,8 @@ export default function AppShell() {
         isMobileOpen={isMobileNavOpen}
         onMobileOpenChange={setIsMobileNavOpen}
         auth={auth}
+        onSearchOpen={() => setIsGlobalSearchOpen(true)}
+        onShortcutsOpen={() => setIsShortcutHelpOpen(true)}
         onLogin={() => setActiveView("login")}
         onProfile={() => setActiveView("settings-profile")}
         onLogout={async () => {
@@ -1276,6 +1390,91 @@ export default function AppShell() {
         </div>
       </main>
 
+      <Dialog open={isGlobalSearchOpen} onOpenChange={setIsGlobalSearchOpen}>
+        <DialogContent className="max-w-2xl p-0">
+          <DialogHeader className="border-b border-border/40 p-4">
+            <DialogTitle className="flex items-center gap-2">
+              <Search className="size-4 text-primary" />
+              Global Search
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4">
+            <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-surface/50 px-3 py-2">
+              <Search className="size-4 text-muted-foreground" />
+              <Input
+                autoFocus
+                value={globalSearchQuery}
+                onChange={(event) => setGlobalSearchQuery(event.target.value)}
+                placeholder="Search projects, requirements, test cases, repositories, validation runs..."
+                className="h-8 border-0 bg-transparent px-0 focus-visible:ring-0"
+              />
+            </div>
+            <div className="mt-4 max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+              {filteredSearchItems.length ? filteredSearchItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={`${item.group}-${item.title}-${item.description}`}
+                    type="button"
+                    onClick={() => {
+                      setActiveView(item.view);
+                      setIsGlobalSearchOpen(false);
+                      setGlobalSearchQuery("");
+                    }}
+                    className="flex w-full items-start gap-3 rounded-lg border border-border/40 bg-card/70 p-3 text-left transition hover:border-primary/30 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="text-xs font-semibold uppercase text-muted-foreground">{item.group}</span>
+                      <span className="block truncate font-semibold">{item.title}</span>
+                      <span className="block truncate text-sm text-muted-foreground">{item.description}</span>
+                    </span>
+                  </button>
+                );
+              }) : (
+                <ProfessionalEmptyState
+                  icon={Search}
+                  title="No search results"
+                  message="Try searching for a project, requirement, repository event, validation run, team member, or settings page."
+                />
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isShortcutHelpOpen} onOpenChange={setIsShortcutHelpOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="size-4 text-primary" />
+              Keyboard Shortcuts
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {[
+              ["/", "Open global search"],
+              ["?", "Open shortcut help"],
+              ["g d", "Go to Dashboard"],
+              ["g p", "Go to Projects"],
+              ["g r", "Go to Repository Intelligence"],
+              ["g v", "Go to Validation History"],
+              ["g a", "Go to Analytics"],
+              ["n p", "Create new project"],
+              ["n t", "Generate new test"],
+              ["Esc", "Close modal or drawer"],
+            ].map(([shortcut, description]) => (
+              <div key={shortcut} className="flex items-center justify-between gap-4 rounded-lg border border-border/40 bg-surface/40 px-3 py-2">
+                <span className="text-sm text-muted-foreground">{description}</span>
+                <kbd className="rounded border border-border/60 bg-background px-2 py-1 text-xs font-semibold">{shortcut}</kbd>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Toaster richColors theme={theme} position="top-right" />
     </div>
   );
@@ -1294,6 +1493,8 @@ function Nav({
   isMobileOpen,
   onMobileOpenChange,
   auth,
+  onSearchOpen,
+  onShortcutsOpen,
   onLogin,
   onProfile,
   onLogout,
@@ -1310,6 +1511,8 @@ function Nav({
   isMobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void;
   auth: AuthContextResponse | null;
+  onSearchOpen: () => void;
+  onShortcutsOpen: () => void;
   onLogin: () => void;
   onProfile: () => void;
   onLogout: () => void;
@@ -1357,6 +1560,8 @@ function Nav({
         auth={auth}
         onMobileOpen={() => onMobileOpenChange(true)}
         onToggleTheme={onToggleTheme}
+        onSearchOpen={onSearchOpen}
+        onShortcutsOpen={onShortcutsOpen}
         onLogin={onLogin}
         onProfile={onProfile}
         onLogout={onLogout}
@@ -2298,6 +2503,18 @@ function formatValidationMode(mode?: RepositoryValidationMode) {
   return `${mode[0].toUpperCase()}${mode.slice(1)}`;
 }
 
+function validationModeEstimate(mode?: RepositoryValidationMode) {
+  if (mode === "full") return "~2 minutes";
+  if (mode === "impact") return "~30 seconds";
+  return "~15 seconds";
+}
+
+function validationModeDescription(mode?: RepositoryValidationMode) {
+  if (mode === "full") return "Runs the complete Playwright suite.";
+  if (mode === "impact") return "Runs impacted tests detected by Repository Intelligence.";
+  return "Runs only newly generated or approved Playwright updates.";
+}
+
 function normalizeValidationBrowser(run?: RepositoryValidationRun | null) {
   const browser = run?.browser?.trim();
   if (browser && !/github actions|local runner|backend/i.test(browser)) return browser;
@@ -2397,11 +2614,13 @@ function ProfessionalEmptyState({
   title,
   message,
   actionLabel,
+  onAction,
 }: {
   icon: typeof Wand2;
   title: string;
   message: string;
   actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="rounded-lg border border-dashed border-border/60 bg-surface/30 p-8 text-center">
@@ -2410,11 +2629,44 @@ function ProfessionalEmptyState({
       </div>
       <h3 className="mt-4 font-semibold">{title}</h3>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">{message}</p>
-      {actionLabel && (
+      {actionLabel && onAction ? (
+        <Button className="mt-4" onClick={onAction}>
+          {actionLabel}
+        </Button>
+      ) : actionLabel ? (
         <Badge variant="outline" className="mt-4 border-primary/30 bg-primary/10 text-primary">
           {actionLabel}
         </Badge>
-      )}
+      ) : null}
+    </div>
+  );
+}
+
+function ContextualLoadingState({
+  icon: Icon = Loader2,
+  title,
+  description,
+}: {
+  icon?: typeof Loader2;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border/50 bg-card/60 p-6">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon className={cn("size-5", Icon === Loader2 && "animate-spin")} />
+        </span>
+        <div>
+          <p className="font-semibold">{title}</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Skeleton className="h-16 rounded-lg" />
+        <Skeleton className="h-16 rounded-lg" />
+        <Skeleton className="h-16 rounded-lg" />
+      </div>
     </div>
   );
 }
@@ -3585,7 +3837,7 @@ const aiFeatureLabels: Record<AIProviderFeatureName, string> = {
   "repository-fix-suggestion": "Repository Fix Suggestion",
 };
 
-type RepositoryIntelligenceTab = "automation" | "application" | "activity";
+type RepositoryIntelligenceTab = "automation" | "application" | "activity" | "learning";
 
 const repositoryIntelligenceMeta: Record<
   "repository-application" | "repository-automation" | "repository-activity" | "repository-impact" | "repository-playwright" | "repository-validation-history" | "repository-release-readiness",
@@ -3928,6 +4180,10 @@ function AutomationRepositorySettings({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isOverrideOpen, setIsOverrideOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<RepositoryIntelligenceTab>(initialTab);
+  const [learningProfile, setLearningProfile] = useState<RepositoryLearningProfile | null>(null);
+  const [isLearningLoading, setIsLearningLoading] = useState(false);
+  const [isLearningRefreshing, setIsLearningRefreshing] = useState(false);
+  const [isLearningResetting, setIsLearningResetting] = useState(false);
   const [overrideForm, setOverrideForm] = useState({
     language: analysis?.language ?? "TypeScript",
     framework: analysis?.framework ?? "Playwright Test Runner",
@@ -3954,6 +4210,19 @@ function AutomationRepositorySettings({
       testFolderPath: config?.testFolderPath ?? (current.testFolderPath || "tests/e2e"),
     }));
   }, [config]);
+
+  useEffect(() => {
+    if (!config?.id) {
+      setLearningProfile(null);
+      return;
+    }
+    setIsLearningLoading(true);
+    projectApi
+      .getRepositoryLearning(config.id)
+      .then(setLearningProfile)
+      .catch(() => setLearningProfile(null))
+      .finally(() => setIsLearningLoading(false));
+  }, [config?.id]);
 
   useEffect(() => {
     setOverrideForm({
@@ -4137,12 +4406,52 @@ function AutomationRepositorySettings({
     }
   };
 
+  const refreshRepositoryLearning = async () => {
+    if (!config?.id) {
+      toast.error("Connect an automation repository before refreshing learning.");
+      return;
+    }
+    try {
+      setIsLearningRefreshing(true);
+      const profile = await projectApi.refreshRepositoryLearning(config.id);
+      setLearningProfile(profile);
+      toast.success("Repository learning refreshed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to refresh repository learning");
+    } finally {
+      setIsLearningRefreshing(false);
+    }
+  };
+
+  const resetRepositoryLearning = async () => {
+    if (!config?.id) return;
+    if (!canManage) {
+      toast.error("Only Owner/Admin can reset repository learning.");
+      return;
+    }
+    try {
+      setIsLearningResetting(true);
+      await projectApi.resetRepositoryLearning(config.id);
+      setLearningProfile(null);
+      toast.success("Repository learning memory reset");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reset repository learning");
+    } finally {
+      setIsLearningResetting(false);
+    }
+  };
+
   const riskClass = (risk: string) =>
     risk === "High"
       ? "border-destructive/40 bg-destructive/10 text-destructive"
       : risk === "Medium"
         ? "border-warning/40 bg-warning/10 text-warning"
         : "border-success/40 bg-success/10 text-success";
+  const learningValidationTotal = (learningProfile?.validationPassCount ?? 0) + (learningProfile?.validationFailCount ?? 0);
+  const learningValidationRate = learningValidationTotal
+    ? Math.round(((learningProfile?.validationPassCount ?? 0) / learningValidationTotal) * 100)
+    : 0;
+  const topLocatorPreference = learningProfile?.locatorPreferences?.[0];
 
   return (
     <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RepositoryIntelligenceTab)} className="space-y-5">
@@ -4150,6 +4459,7 @@ function AutomationRepositorySettings({
         <TabsTrigger value="automation">Automation Repository</TabsTrigger>
         <TabsTrigger value="application">Application Repositories</TabsTrigger>
         <TabsTrigger value="activity">Webhook Activity</TabsTrigger>
+        <TabsTrigger value="learning">Repository Learning</TabsTrigger>
       </TabsList>
       <TabsContent value="automation" className="space-y-5">
       <Card className="app-card p-6">
@@ -4624,6 +4934,167 @@ function AutomationRepositorySettings({
         )}
       </Card>
       </TabsContent>
+      <TabsContent value="learning" className="space-y-5">
+        <Card className="app-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">
+                <Brain className="mr-1 size-3.5" />
+                Repository Learning
+              </Badge>
+              <h2 className="font-display text-2xl font-semibold">Repository Learning</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                AI QA Copilot learns repository-specific Playwright patterns, locator strategy, naming conventions, team feedback, and validation outcomes so future generated tests match this automation repository more closely.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={refreshRepositoryLearning} disabled={!config || isLearningRefreshing}>
+                {isLearningRefreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                Refresh Repository Learning
+              </Button>
+              <Button variant="outline" onClick={resetRepositoryLearning} disabled={!config || !canManage || isLearningResetting}>
+                {isLearningResetting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                Reset Memory
+              </Button>
+            </div>
+          </div>
+
+          {!config ? (
+            <div className="mt-5 rounded-lg border border-dashed border-border/50 p-8 text-center">
+              <Brain className="mx-auto size-8 text-muted-foreground" />
+              <p className="mt-3 text-sm text-muted-foreground">Connect an automation repository before building repository memory.</p>
+            </div>
+          ) : isLearningLoading ? (
+            <Skeleton className="mt-5 h-64 w-full" />
+          ) : !learningProfile ? (
+            <div className="mt-5 rounded-lg border border-dashed border-border/50 p-8 text-center">
+              <Brain className="mx-auto size-8 text-muted-foreground" />
+              <h3 className="mt-3 font-semibold">No repository learning profile yet</h3>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">
+                Refresh learning to analyze existing repository analysis, generated tests, team approvals, edits, rejections, and validation results.
+              </p>
+              <Button className="mt-4" onClick={refreshRepositoryLearning} disabled={isLearningRefreshing}>
+                {isLearningRefreshing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                Build Repository Learning Profile
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-5 space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MiniStat label="Memory Status" value="Active" />
+                <MiniStat label="Repository" value={learningProfile.repositoryName} />
+                <MiniStat label="Overall Confidence" value={`${learningProfile.overallConfidence}%`} />
+                <MiniStat label="Last Analyzed" value={learningProfile.lastAnalyzedAt ? formatDate(learningProfile.lastAnalyzedAt) : "-"} />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <MiniStat label="Framework" value={`${learningProfile.framework}${learningProfile.frameworkVersion ? ` ${learningProfile.frameworkVersion}` : ""}`} />
+                <MiniStat label="Language" value={learningProfile.language} />
+                <MiniStat label="Package Manager" value={learningProfile.packageManager} />
+                <MiniStat label="Preferred Locator" value={topLocatorPreference?.strategy ?? "Learning"} />
+                <MiniStat label="POM Usage" value={learningProfile.testStylePatterns.pageObjectUsage} />
+                <MiniStat label="Test Style" value={learningProfile.testStylePatterns.describeStructure} />
+                <MiniStat label="Naming Pattern" value={learningProfile.namingPatterns.testFilePattern} />
+                <MiniStat label="Validation Success Rate" value={learningValidationTotal ? `${learningValidationRate}%` : "No runs"} />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1fr_.9fr]">
+                <Card className="border border-border/40 bg-card/70 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold">Learned Pattern Signals</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">Patterns used as context before generating future Playwright tests.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">Repository-Aware</Badge>
+                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">Learned Pattern</Badge>
+                      {learningProfile.overallConfidence >= 85 && (
+                        <Badge variant="outline" className="border-success/30 bg-success/10 text-success">High Confidence</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                      <p className="text-xs font-semibold uppercase text-muted-foreground">Test Directories</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(learningProfile.testDirectories.length ? learningProfile.testDirectories : ["Not detected"]).map((item) => (
+                          <Badge key={item} variant="outline" className="font-mono text-[11px]">{item}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                      <p className="text-xs font-semibold uppercase text-muted-foreground">Page Object Directories</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(learningProfile.pageObjectDirectories.length ? learningProfile.pageObjectDirectories : ["Not detected"]).map((item) => (
+                          <Badge key={item} variant="outline" className="font-mono text-[11px]">{item}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                      <p className="text-xs font-semibold uppercase text-muted-foreground">Locator Preferences</p>
+                      <div className="mt-2 space-y-2">
+                        {learningProfile.locatorPreferences.map((preference) => (
+                          <div key={preference.strategy} className="space-y-1">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="font-semibold">{preference.strategy}</span>
+                              <span className="text-muted-foreground">{preference.weight}%</span>
+                            </div>
+                            <Progress value={preference.weight} className="h-1.5" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/40 bg-surface/40 p-3">
+                      <p className="text-xs font-semibold uppercase text-muted-foreground">Common Flows</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(learningProfile.commonFlows.length ? learningProfile.commonFlows : ["No generated flows yet"]).map((flow) => (
+                          <Badge key={flow} variant="outline">{flow}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="border border-border/40 bg-card/70 p-4">
+                  <h3 className="font-semibold">Team Feedback Learning</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">Approved, rejected, edited, and validated tests tune future AI confidence.</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <MiniStat label="Accepted Tests" value={learningProfile.acceptedGenerationCount} />
+                    <MiniStat label="Rejected Tests" value={learningProfile.rejectedGenerationCount} />
+                    <MiniStat label="Edited Tests" value={learningProfile.editedGenerationCount} />
+                    <MiniStat label="Validation Passes" value={learningProfile.validationPassCount} />
+                    <MiniStat label="Validation Failures" value={learningProfile.validationFailCount} />
+                    <MiniStat label="Repository Match" value={`${learningProfile.repositoryMatchScore}%`} />
+                  </div>
+                </Card>
+              </div>
+
+              <Card className="border border-border/40 bg-card/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">AI Confidence Trend</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Recent learning events and score changes for this repository only.</p>
+                  </div>
+                  <Badge variant="outline">{learningProfile.aiConfidenceTrend.length} events</Badge>
+                </div>
+                {learningProfile.aiConfidenceTrend.length === 0 ? (
+                  <p className="mt-4 rounded-lg border border-dashed border-border/50 p-5 text-center text-sm text-muted-foreground">No confidence events yet.</p>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {learningProfile.aiConfidenceTrend.slice(-6).reverse().map((event) => (
+                      <div key={`${event.date}-${event.event}-${event.score}`} className="grid gap-3 rounded-lg border border-border/40 bg-surface/40 p-3 text-sm md:grid-cols-[180px_1fr_100px]">
+                        <span className="text-muted-foreground">{formatDate(event.date)}</span>
+                        <span className="font-medium">{event.event}</span>
+                        <span className="font-semibold text-primary">{event.score}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
+        </Card>
+      </TabsContent>
       <TabsContent value="application">
         <ApplicationRepositoriesPanel
           workspaceId={workspaceId}
@@ -4771,12 +5242,18 @@ function ApplicationRepositoriesPanel({
       </Card>
 
       {isLoading ? (
-        <Skeleton className="h-40 w-full" />
+        <ContextualLoadingState
+          icon={Github}
+          title="Loading connected repositories"
+          description="Checking application repository connections, webhook status, and last received GitHub events."
+        />
       ) : repositories.length === 0 ? (
-        <Card className="border-dashed border-border/50 bg-card/40 p-10 text-center">
-          <GitBranch className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">No application repositories connected yet.</p>
-        </Card>
+        <ProfessionalEmptyState
+          icon={GitBranch}
+          title="No application repositories connected"
+          message="Connect frontend or backend repositories to receive GitHub webhook activity and prepare future AI impact analysis."
+          actionLabel="Use the connection form above"
+        />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {repositories.map((repository) => (
@@ -4848,6 +5325,20 @@ function RepositoryActivityPanel({
   const [isRetryingValidation, setIsRetryingValidation] = useState(false);
   const [isPrCreating, setIsPrCreating] = useState(false);
   const [fixSuggestion, setFixSuggestion] = useState("");
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityEventFilter, setActivityEventFilter] = useState("all");
+  const [activityStatusFilter, setActivityStatusFilter] = useState("all");
+  const [activityRepositoryFilter, setActivityRepositoryFilter] = useState("all");
+  const visibleActivities = activities.filter((activity) => {
+    const repositoryKey = `${activity.repoOwner}/${activity.repoName}`;
+    const query = activitySearch.trim().toLowerCase();
+    return (
+      (!query || `${repositoryKey} ${activity.branch} ${activity.author} ${activity.message}`.toLowerCase().includes(query)) &&
+      (activityEventFilter === "all" || activity.eventType === activityEventFilter) &&
+      (activityStatusFilter === "all" || activity.status === activityStatusFilter) &&
+      (activityRepositoryFilter === "all" || repositoryKey === activityRepositoryFilter)
+    );
+  });
   const totalFiles = activities.reduce((sum, activity) => sum + activity.fileCount, 0);
   const lastActivity = activities[0]?.createdAt;
   const approvedOrEditedUpdates = testUpdates.filter((update) => update.status === "Approved" || update.status === "Edited");
@@ -4868,6 +5359,13 @@ function RepositoryActivityPanel({
     ? `${validationRepoUrl}/tree/${encodeURIComponent(validationRun.validationBranchName)}`
     : undefined;
   const validationProgressStages = ["Queued", "Preparing Runner", "Installing Dependencies", "Installing Browsers", "Running Tests", "Uploading Reports", "Completed"];
+  const validationQueueStatus = validationRun?.status === "Pending" ? "Queued" : validationRun?.status === "Running" ? "Running" : validationRun?.status ?? "Not Started";
+  const validationElapsed = validationRun ? formatValidationDuration(Date.now() - new Date(validationRun.createdAt).getTime()) : "-";
+  const validationEstimatedTime = validationModeEstimate(validationMode);
+  const validationProgressPercent = validationRun
+    ? validationRun.status === "Passed" || validationRun.status === "Failed" ? 100
+      : Math.min(95, Math.max(12, (validationRun.validationStageTimings?.filter((item) => item.status === "Passed" || item.status === "Skipped").length ?? 0) * 14))
+    : 0;
   const recommendationBlocksPr = validationRecommendation?.releaseRecommendation === "Do Not Merge";
   const recommendationWarnsPr = validationRecommendation?.releaseRecommendation === "Merge with Caution";
   const downloadValidationJson = () => {
@@ -5021,6 +5519,7 @@ function RepositoryActivityPanel({
       setAutoFixes([]);
       setRetryAttempts([]);
       toast.success("Validation started. Results will appear here automatically.");
+      localStorage.setItem(`aiqa-active-validation-${impactAnalysis.id}`, startedRun.id);
 
       let latestRun = startedRun;
       for (let attempt = 0; attempt < 80 && !isTerminalStatus(latestRun.status); attempt += 1) {
@@ -5035,6 +5534,7 @@ function RepositoryActivityPanel({
       }
 
       toast.success(latestRun.status === "Failed" ? "Validation completed with failures" : "Validation completed");
+      localStorage.removeItem(`aiqa-active-validation-${impactAnalysis.id}`);
       void loadValidationRecommendation(impactAnalysis.id, false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Validation failed");
@@ -5042,6 +5542,26 @@ function RepositoryActivityPanel({
       setIsValidationRunning(false);
     }
   };
+
+  useEffect(() => {
+    if (!impactAnalysis || !validationRun || isValidationRunning || !["Pending", "Running"].includes(validationRun.status)) return;
+    localStorage.setItem(`aiqa-active-validation-${impactAnalysis.id}`, validationRun.id);
+    const interval = window.setInterval(async () => {
+      try {
+        const latestRun = await projectApi.getRepositoryUpdateValidation(impactAnalysis.id);
+        setValidationRun(latestRun);
+        if (!["Pending", "Running"].includes(latestRun.status)) {
+          localStorage.removeItem(`aiqa-active-validation-${impactAnalysis.id}`);
+          toast.success(latestRun.status === "Failed" ? "Validation completed with failures" : "Validation completed");
+          void loadValidationRecommendation(impactAnalysis.id, false);
+          window.clearInterval(interval);
+        }
+      } catch {
+        // Keep the current validation view intact if a transient poll fails.
+      }
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, [impactAnalysis, isValidationRunning, validationRun]);
 
   const loadValidationRecommendation = async (impactAnalysisId: string, regenerate: boolean) => {
     try {
@@ -5182,18 +5702,75 @@ function RepositoryActivityPanel({
 
       <Card className="app-card overflow-hidden p-0">
         <div className="border-b border-border/40 p-5">
-          <h2 className="font-display text-xl font-semibold">Repository Activity</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Latest GitHub push and pull request events from connected application repositories.</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-xl font-semibold">Repository Activity</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Latest GitHub push and pull request events from connected application repositories.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={onRefresh}>
+              <RefreshCw className="size-4" />
+              Refresh
+            </Button>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-4">
+            <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-surface/50 px-3 py-2">
+              <Search className="size-4 text-muted-foreground" />
+              <Input
+                value={activitySearch}
+                onChange={(event) => setActivitySearch(event.target.value)}
+                placeholder="Search activity"
+                className="h-7 border-0 bg-transparent px-0 focus-visible:ring-0"
+              />
+            </div>
+            <Select value={activityRepositoryFilter} onValueChange={setActivityRepositoryFilter}>
+              <SelectTrigger><SelectValue placeholder="Repository" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All repositories</SelectItem>
+                {Array.from(new Set(activities.map((activity) => `${activity.repoOwner}/${activity.repoName}`))).map((repository) => (
+                  <SelectItem key={repository} value={repository}>{repository}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={activityEventFilter} onValueChange={setActivityEventFilter}>
+              <SelectTrigger><SelectValue placeholder="Event type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All events</SelectItem>
+                <SelectItem value="push">Push</SelectItem>
+                <SelectItem value="pull_request">Pull Request</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={activityStatusFilter} onValueChange={setActivityStatusFilter}>
+              <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="New">New</SelectItem>
+                <SelectItem value="Reviewed">Reviewed</SelectItem>
+                <SelectItem value="Ignored">Ignored</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         {activities.length === 0 ? (
-          <div className="p-10 text-center">
-            <RefreshCw className="mx-auto size-8 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">No webhook activity received yet.</p>
+          <div className="p-6">
+            <ProfessionalEmptyState
+              icon={RefreshCw}
+              title="No repository activity yet"
+              message="Connect application repositories and register webhooks to capture push and pull request events for impact analysis."
+              actionLabel="Connect Repository"
+            />
+          </div>
+        ) : visibleActivities.length === 0 ? (
+          <div className="p-6">
+            <ProfessionalEmptyState
+              icon={Search}
+              title="No activity matches these filters"
+              message="Adjust repository, event, status, or search filters to see more activity."
+            />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-surface/60 text-xs uppercase text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-surface/90 text-xs uppercase text-muted-foreground backdrop-blur">
                 <tr>
                   <th className="px-4 py-3">Time</th>
                   <th className="px-4 py-3">Repository</th>
@@ -5208,7 +5785,7 @@ function RepositoryActivityPanel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
-                {activities.map((activity) => (
+                {visibleActivities.map((activity) => (
                   <tr key={activity.id}>
                     <td className="px-4 py-3 whitespace-nowrap">{formatDate(activity.createdAt)}</td>
                     <td className="px-4 py-3 font-medium">{activity.repoOwner}/{activity.repoName}</td>
@@ -5394,6 +5971,11 @@ function RepositoryActivityPanel({
                               <SelectItem value="full">Full Validation</SelectItem>
                             </SelectContent>
                           </Select>
+                          <div className="rounded-lg border border-border/40 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+                            <span className="font-semibold text-foreground">{formatValidationMode(validationMode)}</span>
+                            <span className="mx-1">•</span>
+                            <span>Estimated {validationEstimatedTime}</span>
+                          </div>
                           <Button variant="outline" onClick={runValidation} disabled={!hasApprovedOrEditedUpdates || validationInProgress}>
                             {validationInProgress ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
                             Run Validation
@@ -5434,8 +6016,47 @@ function RepositoryActivityPanel({
                                     Generated using detected repository patterns, locator strategy, and assertion style.
                                   </p>
                                 </div>
-                                <Badge variant="outline">{update.repositoryContextSummary?.pattern ?? "Repository pattern"}</Badge>
+                                <div className="flex flex-wrap gap-2">
+                                  {update.repositoryLearningUsed ? (
+                                    <>
+                                      <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">Repository-Aware</Badge>
+                                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">Learned Pattern</Badge>
+                                      {update.repositoryLearningUsed.overallConfidence >= 85 && (
+                                        <Badge variant="outline" className="border-success/30 bg-success/10 text-success">High Confidence</Badge>
+                                      )}
+                                    </>
+                                  ) : null}
+                                  <Badge variant="outline">{update.repositoryContextSummary?.pattern ?? "Repository pattern"}</Badge>
+                                </div>
                               </div>
+                              {update.repositoryLearningUsed ? (
+                                <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-3">
+                                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-xs font-semibold uppercase text-muted-foreground">AI Repository Learning Used</p>
+                                    <Badge variant="outline">{update.repositoryLearningUsed.overallConfidence}% overall confidence</Badge>
+                                  </div>
+                                  <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-3 xl:grid-cols-6">
+                                    <div className="rounded-md bg-surface/70 p-2">
+                                      <span className="font-semibold text-foreground">Locator:</span> {update.repositoryLearningUsed.locatorStrategy}
+                                    </div>
+                                    <div className="rounded-md bg-surface/70 p-2">
+                                      <span className="font-semibold text-foreground">POM:</span> {update.repositoryLearningUsed.pageObjectModel ? "Enabled" : "Not detected"}
+                                    </div>
+                                    <div className="rounded-md bg-surface/70 p-2">
+                                      <span className="font-semibold text-foreground">Style:</span> {update.repositoryLearningUsed.testStyle}
+                                    </div>
+                                    <div className="rounded-md bg-surface/70 p-2">
+                                      <span className="font-semibold text-foreground">Naming:</span> {update.repositoryLearningUsed.namingPattern}
+                                    </div>
+                                    <div className="rounded-md bg-surface/70 p-2">
+                                      <span className="font-semibold text-foreground">Repo Match:</span> {update.repositoryLearningUsed.repositoryMatchScore}%
+                                    </div>
+                                    <div className="rounded-md bg-surface/70 p-2">
+                                      <span className="font-semibold text-foreground">Confidence:</span> {update.repositoryLearningUsed.overallConfidence}%
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : null}
                               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                                 <MiniStat label="Repo Match" value={`${update.repositoryMatchScore ?? update.qualityReport?.repositoryStyleMatch ?? update.confidenceScore}%`} />
                                 <MiniStat label="Locator" value={`${update.locatorConfidence ?? update.qualityReport?.locatorQuality ?? update.confidenceScore}%`} />
@@ -5526,7 +6147,22 @@ function RepositoryActivityPanel({
                           </div>
                           {validationInProgress ? (
                             <div className="rounded-lg border border-border/40 bg-card/70 p-4">
-                              <p className="font-semibold">Validation Progress</p>
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold">Validation Progress</p>
+                                  <p className="mt-1 text-sm text-muted-foreground">{validationModeDescription(validationRun.validationMode ?? validationMode)}</p>
+                                </div>
+                                <Badge variant="outline" className={validationStatusClass(validationQueueStatus)}>{validationQueueStatus}</Badge>
+                              </div>
+                              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <MiniStat label="Progress" value={`${validationProgressPercent}%`} />
+                                <MiniStat label="Elapsed" value={validationElapsed} />
+                                <MiniStat label="Estimated Time" value={validationModeEstimate(validationRun.validationMode ?? validationMode)} />
+                                <MiniStat label="Queue Position" value={validationQueueStatus === "Queued" ? "1" : "-"} />
+                              </div>
+                              <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+                                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${validationProgressPercent}%` }} />
+                              </div>
                               <div className="mt-4 grid gap-2 md:grid-cols-7">
                                 {validationProgressStages.map((stage, index) => {
                                   const completedIndex = validationRun.validationStageTimings?.filter((item) => item.status === "Passed" || item.status === "Skipped").length ?? 0;
@@ -6539,6 +7175,23 @@ function LandingPage({
       icon: ShieldCheck,
     },
   ];
+  const organizationCards = [
+    {
+      title: "Multi-tenant Workspaces",
+      description: "Separate teams, clients, projects, roles, and QA assets inside governed organization workspaces.",
+      icon: Layers3,
+    },
+    {
+      title: "Team Management",
+      description: "Invite members, manage access, assign project visibility, and support team-based QA operations.",
+      icon: Users,
+    },
+    {
+      title: "Role-Based Access",
+      description: "Control who can create, review, approve, execute, export, configure integrations, and manage settings.",
+      icon: ShieldCheck,
+    },
+  ];
   const faqs = [
     ["What is AI QA Copilot?", "AI QA Copilot is an AI-Powered Quality Engineering Platform for requirement analysis, test generation, review, execution, repository intelligence, Playwright validation, and QA reporting."],
     ["How does Automation Repository Onboarding help?", "It scans connected Playwright repositories, checks compatibility, initializes missing setup files safely, and prepares GitHub Actions validation."],
@@ -6812,6 +7465,24 @@ function LandingPage({
                   <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{description}</p>
                 </div>
               </div>
+            </div>
+          ))}
+        </div>
+      </LandingSection>
+
+      <LandingSection
+        eyebrow="Authentication & Organization"
+        title="Secure Collaboration for Enterprise QA Teams"
+        description="AI QA Copilot supports authenticated team workspaces with governed access, clear ownership, and role-based controls across the QA lifecycle."
+      >
+        <div className="grid gap-3 md:grid-cols-3">
+          {organizationCards.map(({ title, description, icon: Icon }) => (
+            <div key={title} className="rounded-lg border border-border/40 bg-card/60 p-4 transition-colors hover:border-primary/40">
+              <span className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Icon className="size-4" />
+              </span>
+              <h3 className="mt-3 text-sm font-semibold">{title}</h3>
+              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{description}</p>
             </div>
           ))}
         </div>
@@ -7251,11 +7922,36 @@ function AnalyticsDashboardPage({
     onFiltersChange({ ...filters, ...patch });
   };
   const selectedProjectModules = filters.projectId && projectDetail?.project.id === filters.projectId ? projectDetail.modules : [];
+  const [isQualityRecalculating, setIsQualityRecalculating] = useState(false);
+  const qualityTone = (score: number) =>
+    score >= 90
+      ? "border-success/40 bg-success/10 text-success"
+      : score >= 80
+        ? "border-primary/40 bg-primary/10 text-primary"
+        : score >= 70
+          ? "border-warning/40 bg-warning/10 text-warning"
+          : "border-destructive/40 bg-destructive/10 text-destructive";
+  const recalculateQuality = async () => {
+    try {
+      setIsQualityRecalculating(true);
+      const result = await projectApi.recalculateAIQuality(filters);
+      toast.success(`AI quality metrics recalculated for ${result.recalculated} generated output(s)`);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to recalculate AI quality metrics");
+    } finally {
+      setIsQualityRecalculating(false);
+    }
+  };
 
   if (isLoading && !analytics) {
     return (
       <div className="grid gap-4">
-        <Skeleton className="h-40 w-full" />
+        <ContextualLoadingState
+          icon={BarChart3}
+          title="Loading analytics and AI quality metrics"
+          description="Fetching coverage, review status, team productivity, validation trends, and AI quality score evidence."
+        />
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-80 w-full" />
           <Skeleton className="h-80 w-full" />
@@ -7378,6 +8074,84 @@ function AnalyticsDashboardPage({
             <MiniStat label="AI Chat Interactions" value={analytics.summary.aiChatInteractions} />
             <MiniStat label="PDF / Excel Exports" value={`${analytics.exports.totalPdfExports}/${analytics.exports.totalExcelExports}`} />
           </div>
+
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Brain className="size-4 text-primary" />
+                  AI Quality Score
+                </div>
+                <h2 className="mt-2 font-display text-2xl font-semibold">Evidence-based quality measurement</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  Measure AI output quality using requirement coverage, repository match, validation success, user acceptance, manual edit effort, and confidence trend.
+                </p>
+              </div>
+              <Button variant="outline" onClick={recalculateQuality} disabled={isQualityRecalculating}>
+                {isQualityRecalculating ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                Recalculate
+              </Button>
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
+              <div className={cn("rounded-xl border p-5", qualityTone(analytics.aiQuality.overallQualityScore))}>
+                <p className="text-sm font-semibold uppercase tracking-wide">Overall AI Quality Score</p>
+                <div className="mt-3 flex items-end gap-3">
+                  <span className="font-display text-6xl font-bold">{analytics.aiQuality.overallQualityScore}</span>
+                  <span className="pb-2 text-lg font-semibold">/ 100</span>
+                </div>
+                <Badge variant="outline" className={cn("mt-4", qualityTone(analytics.aiQuality.overallQualityScore))}>
+                  {analytics.aiQuality.qualityLabel}
+                </Badge>
+                <div className="mt-5 space-y-3">
+                  {analytics.aiQuality.improvementSuggestions.slice(0, 3).map((suggestion) => (
+                    <div key={suggestion} className="rounded-lg bg-background/70 p-3 text-sm leading-6 text-foreground">
+                      {suggestion}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <MiniStat label="Requirement Coverage" value={`${analytics.aiQuality.requirementCoverage}%`} />
+                <MiniStat label="Repository Match" value={`${analytics.aiQuality.repositoryMatchScore}%`} />
+                <MiniStat label="Test Accuracy" value={`${analytics.aiQuality.testGenerationAccuracy}%`} />
+                <MiniStat label="Validation Success" value={`${analytics.aiQuality.validationSuccessRate}%`} />
+                <MiniStat label="Manual Edit Rate" value={`${analytics.aiQuality.manualEditRate}%`} />
+                <MiniStat label="Manual Edit Score" value={`${analytics.aiQuality.manualEditScore}%`} />
+                <MiniStat label="User Acceptance" value={`${analytics.aiQuality.userAcceptanceRate}%`} />
+                <MiniStat label="AI Confidence" value={`${analytics.aiQuality.aiConfidenceScore}%`} />
+                <MiniStat label="Generated Outputs" value={analytics.aiQuality.totalGeneratedOutputs} />
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              <ChartCard title="AI Confidence and Quality Trend">
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={analytics.aiQualityTrends}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="qualityScore" name="Quality Score" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="aiConfidenceScore" name="AI Confidence" stroke="#22c55e" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartCard>
+              <ChartCard title="Quality Distribution">
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie data={analytics.aiQuality.qualityDistribution} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={3}>
+                      {analytics.aiQuality.qualityDistribution.map((entry, index) => (
+                        <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            </div>
+          </Card>
 
           <div className="grid gap-4 xl:grid-cols-2">
             <ChartCard title="Coverage Trend Over Time">
@@ -7519,7 +8293,11 @@ function AnalyticsDashboardPage({
           </div>
         </>
       ) : (
-        <EmptyAnalyticsState label="No analytics data loaded yet." />
+        <ProfessionalEmptyState
+          icon={BarChart3}
+          title="No analytics data available"
+          message="Generate test cases, run reviews, execute tests, or validate Playwright updates to build analytics and AI quality evidence."
+        />
       )}
     </div>
   );

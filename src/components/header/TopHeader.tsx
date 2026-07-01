@@ -1,4 +1,4 @@
-import { Bell, ChevronDown, Menu, Moon, Sun, UserCircle, XCircle } from "lucide-react";
+import { Bell, ChevronDown, Keyboard, Menu, Moon, Search, Sun, UserCircle, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,8 @@ export function TopHeader({
   auth,
   onMobileOpen,
   onToggleTheme,
+  onSearchOpen,
+  onShortcutsOpen,
   onLogin,
   onProfile,
   onLogout,
@@ -26,6 +28,8 @@ export function TopHeader({
   auth: AuthContextResponse | null;
   onMobileOpen: () => void;
   onToggleTheme: () => void;
+  onSearchOpen: () => void;
+  onShortcutsOpen: () => void;
   onLogin: () => void;
   onProfile: () => void;
   onLogout: () => void;
@@ -51,9 +55,29 @@ export function TopHeader({
           <Menu className="size-4" />
         </Button>
 
-        <div className="hidden min-w-0 flex-1 md:block" />
+        <button
+          type="button"
+          onClick={onSearchOpen}
+          className="hidden h-10 min-w-0 flex-1 items-center gap-3 rounded-lg border border-border/50 bg-surface/60 px-3 text-left text-sm text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex"
+          aria-label="Open global search"
+        >
+          <Search className="size-4 shrink-0" />
+          <span className="truncate">Search projects, requirements, repositories, validations...</span>
+          <kbd className="ml-auto rounded border border-border/60 bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground">/</kbd>
+        </button>
 
         <div className="ml-auto flex items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="size-10"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts"
+            onClick={onShortcutsOpen}
+          >
+            <Keyboard className="size-4" />
+          </Button>
           <Button type="button" variant="outline" size="icon" className="size-10" aria-label="Notifications">
             <Bell className="size-4" />
           </Button>
