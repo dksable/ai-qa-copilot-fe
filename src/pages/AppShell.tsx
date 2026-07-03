@@ -129,13 +129,25 @@ import {
   type AnalyticsUserProductivity,
   type AIQualitySummary,
   type AIQualityTrendPoint,
+  type ApiAnalyticsSummary,
   type AIProviderConfig,
   type AIProviderFeatureMapping,
   type AIProviderFeatureName,
   type AIProviderSettingsResponse,
   type AIProviderUsageLog,
   type ApiEndpoint,
+  type ApiFailureAnalysis,
+  type ApiFailureEvidence,
+  type ApiImpactAnalysis,
+  type ApiRepositoryCoverage,
+  type ApiRepositoryDependencyGraph,
+  type ApiRepositoryProfile,
+  type ApiRepositoryRiskSummary,
+  type ApiRouteMapping,
   type ApiRun,
+  type ApiValidationMode,
+  type ApiValidationResult,
+  type ApiValidationRun,
   type ApiContractValidation,
   type ContractDashboard,
   type ApiRiskLevel,
@@ -247,6 +259,7 @@ interface AnalyticsBundle {
   exports: AnalyticsExports;
   aiQuality: AIQualitySummary;
   aiQualityTrends: AIQualityTrendPoint[];
+  apiAnalytics: ApiAnalyticsSummary;
 }
 
 export default function AppShell() {
@@ -581,6 +594,7 @@ export default function AppShell() {
         exports,
         aiQuality,
         aiQualityTrends,
+        apiAnalytics,
       ] = await Promise.all([
         projectApi.getAnalyticsSummary(filters),
         projectApi.getAnalyticsCoverage(filters),
@@ -592,8 +606,9 @@ export default function AppShell() {
         projectApi.getAnalyticsExports(filters),
         projectApi.getAIQualitySummary(filters),
         projectApi.getAIQualityTrends(filters),
+        projectApi.getApiAnalyticsSummary(filters),
       ]);
-      setAnalytics({ summary, coverage, generation, review, projectHealth, userProductivity, aiUsage, exports, aiQuality, aiQualityTrends });
+      setAnalytics({ summary, coverage, generation, review, projectHealth, userProductivity, aiUsage, exports, aiQuality, aiQualityTrends, apiAnalytics });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load analytics");
     } finally {
@@ -2515,6 +2530,54 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function RiskBadge({ risk }: { risk: ApiRiskLevel }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        risk === "High" && "border-red-200 bg-red-50 text-red-700",
+        risk === "Medium" && "border-amber-200 bg-amber-50 text-amber-700",
+        risk === "Low" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+      )}
+    >
+      {risk}
+    </Badge>
+  );
+}
+
+function ApiValidationStatusBadge({ status }: { status: ApiValidationRun["status"] }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        status === "Passed" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+        status === "Running" && "border-blue-200 bg-blue-50 text-blue-700",
+        status === "Queued" && "border-slate-200 bg-slate-50 text-slate-700",
+        status === "Cancelled" && "border-orange-200 bg-orange-50 text-orange-700",
+        status === "Failed" && "border-red-200 bg-red-50 text-red-700",
+        status === "Error" && "border-red-300 bg-red-100 text-red-900",
+      )}
+    >
+      {status}
+    </Badge>
+  );
+}
+
+function ImpactList({ title, items, empty = "None detected" }: { title: string; items: string[]; empty?: string }) {
+  return (
+    <div className="rounded-xl border bg-background p-3">
+      <p className="text-sm font-semibold">{title}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.length ? items.slice(0, 12).map((item) => (
+          <Badge key={item} variant="outline" className="max-w-full truncate">
+            {item}
+          </Badge>
+        )) : <span className="text-sm text-muted-foreground">{empty}</span>}
+      </div>
+    </div>
+  );
+}
+
 function formatValidationDuration(durationMs?: number) {
   const totalSeconds = Math.max(0, Math.round((durationMs ?? 0) / 1000));
   if (totalSeconds < 60) return `${totalSeconds} seconds`;
@@ -3975,12 +4038,28 @@ function ApiWorkspacePage({
   const [contractDashboard, setContractDashboard] = useState<ContractDashboard | null>(null);
   const [contractValidations, setContractValidations] = useState<ApiContractValidation[]>([]);
   const [selectedContractValidation, setSelectedContractValidation] = useState<ApiContractValidation | null>(null);
+  const [apiRepositories, setApiRepositories] = useState<ApiRepositoryProfile[]>([]);
+  const [selectedApiRepositoryId, setSelectedApiRepositoryId] = useState("");
+  const [apiRouteMappings, setApiRouteMappings] = useState<ApiRouteMapping[]>([]);
+  const [apiDependencyGraph, setApiDependencyGraph] = useState<ApiRepositoryDependencyGraph[]>([]);
+  const [apiRepositoryCoverage, setApiRepositoryCoverage] = useState<ApiRepositoryCoverage | null>(null);
+  const [apiRepositoryRisk, setApiRepositoryRisk] = useState<ApiRepositoryRiskSummary | null>(null);
+  const [apiImpactAnalysis, setApiImpactAnalysis] = useState<ApiImpactAnalysis | null>(null);
+  const [apiValidations, setApiValidations] = useState<ApiValidationRun[]>([]);
+  const [selectedApiValidation, setSelectedApiValidation] = useState<ApiValidationRun | null>(null);
+  const [apiValidationResults, setApiValidationResults] = useState<ApiValidationResult[]>([]);
+  const [apiFailureAnalysis, setApiFailureAnalysis] = useState<ApiFailureAnalysis | null>(null);
+  const [apiFailureEvidence, setApiFailureEvidence] = useState<ApiFailureEvidence[]>([]);
   const [latestCollectionSummary, setLatestCollectionSummary] = useState<{ total: number; passed: number; failed: number; errors: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isGeneratingApiTests, setIsGeneratingApiTests] = useState(false);
   const [isRunningApi, setIsRunningApi] = useState(false);
   const [isValidatingContract, setIsValidatingContract] = useState(false);
+  const [isRunningApiValidation, setIsRunningApiValidation] = useState(false);
+  const [isAnalyzingApiFailure, setIsAnalyzingApiFailure] = useState(false);
+  const [isScanningApiRepository, setIsScanningApiRepository] = useState(false);
+  const [isAnalyzingApiImpact, setIsAnalyzingApiImpact] = useState(false);
   const [projectId, setProjectId] = useState("none");
   const [apiGenerationType, setApiGenerationType] = useState<ApiTestGenerationType>("all");
   const [apiFramework, setApiFramework] = useState<ApiTestFramework>("playwright");
@@ -3997,39 +4076,61 @@ function ApiWorkspacePage({
   const [runnerTimeout, setRunnerTimeout] = useState("15000");
   const [runnerStatusAssertion, setRunnerStatusAssertion] = useState("200");
   const [runnerResponseTimeAssertion, setRunnerResponseTimeAssertion] = useState("2000");
+  const [apiValidationMode, setApiValidationMode] = useState<ApiValidationMode>("quick");
+  const [apiValidationEnvironment, setApiValidationEnvironment] = useState("QA");
   const [swaggerUrl, setSwaggerUrl] = useState("");
   const [apiUrl, setApiUrl] = useState("");
   const [githubForm, setGithubForm] = useState({ owner: "", repo: "", path: "", branch: "main" });
   const [postmanGithubForm, setPostmanGithubForm] = useState({ owner: "", repo: "", path: "", branch: "main" });
+  const [apiRepositoryForm, setApiRepositoryForm] = useState({ owner: "", repo: "", defaultBranch: "main", token: "" });
+  const [apiChangedFiles, setApiChangedFiles] = useState("");
   const canImport = ["Owner", "Admin", "QA Lead"].includes(role);
   const canDelete = ["Owner", "Admin"].includes(role);
   const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId) ?? workspaces[0] ?? null;
   const selectedPostman = postmanWorkspaces.find((item) => item.id === selectedPostmanId) ?? postmanWorkspaces[0] ?? null;
+  const selectedApiRepository = apiRepositories.find((item) => item.id === selectedApiRepositoryId || item.repositoryId === selectedApiRepositoryId) ?? apiRepositories[0] ?? null;
 
   const loadWorkspaces = async () => {
     setIsLoading(true);
     try {
-      const [list, postmanList] = await Promise.all([
+      const [list, postmanList, repositoryList] = await Promise.all([
         projectApi.listApiWorkspaces({ workspaceId }),
         projectApi.listPostmanWorkspaces({ workspaceId }),
+        projectApi.listApiRepositories(workspaceId),
       ]);
       setWorkspaces(list);
       setPostmanWorkspaces(postmanList);
+      setApiRepositories(repositoryList);
       const nextId = selectedWorkspaceId && list.some((item) => item.id === selectedWorkspaceId)
         ? selectedWorkspaceId
         : list[0]?.id ?? "";
       const nextPostmanId = selectedPostmanId && postmanList.some((item) => item.id === selectedPostmanId)
         ? selectedPostmanId
         : postmanList[0]?.id ?? "";
+      const nextApiRepositoryId = selectedApiRepositoryId && repositoryList.some((item) => item.id === selectedApiRepositoryId || item.repositoryId === selectedApiRepositoryId)
+        ? selectedApiRepositoryId
+        : repositoryList[0]?.id ?? "";
       setSelectedWorkspaceId(nextId);
       setSelectedPostmanId(nextPostmanId);
-      const [nextEndpoints, nextPostmanRequests] = await Promise.all([
+      setSelectedApiRepositoryId(nextApiRepositoryId);
+      const [nextEndpoints, nextPostmanRequests, nextApiRoutes, nextDependencyGraph, nextCoverage, nextRisk] = await Promise.all([
         nextId ? projectApi.listApiEndpoints(nextId) : Promise.resolve([]),
         nextPostmanId ? projectApi.listPostmanRequests(nextPostmanId) : Promise.resolve([]),
+        nextApiRepositoryId ? projectApi.listApiRepositoryEndpoints(nextApiRepositoryId) : Promise.resolve([]),
+        nextApiRepositoryId ? projectApi.getApiRepositoryDependencyGraph(nextApiRepositoryId) : Promise.resolve([]),
+        nextApiRepositoryId ? projectApi.getApiRepositoryCoverage(nextApiRepositoryId) : Promise.resolve(null),
+        nextApiRepositoryId ? projectApi.getApiRepositoryRiskSummary(nextApiRepositoryId) : Promise.resolve(null),
       ]);
       setEndpoints(nextEndpoints);
       setPostmanRequests(nextPostmanRequests);
+      setApiRouteMappings(nextApiRoutes);
+      setApiDependencyGraph(nextDependencyGraph);
+      setApiRepositoryCoverage(nextCoverage);
+      setApiRepositoryRisk(nextRisk);
       setApiRuns(await projectApi.listApiRuns({ workspaceId }));
+      const validationHistory = await projectApi.listApiValidations({ workspaceId });
+      setApiValidations(validationHistory);
+      setSelectedApiValidation(validationHistory[0] ?? null);
       setContractDashboard(await projectApi.getApiContractDashboard(workspaceId));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load API workspaces.");
@@ -4066,6 +4167,102 @@ function ApiWorkspacePage({
       toast.error(error instanceof Error ? error.message : "Unable to load Postman requests.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const selectApiRepository = async (repositoryId: string) => {
+    setSelectedApiRepositoryId(repositoryId);
+    setIsLoading(true);
+    try {
+      const [routes, graph, coverage, risk, summary] = await Promise.all([
+        projectApi.listApiRepositoryEndpoints(repositoryId),
+        projectApi.getApiRepositoryDependencyGraph(repositoryId),
+        projectApi.getApiRepositoryCoverage(repositoryId),
+        projectApi.getApiRepositoryRiskSummary(repositoryId),
+        projectApi.getApiRepositorySummary(repositoryId),
+      ]);
+      setApiRouteMappings(routes);
+      setApiDependencyGraph(graph);
+      setApiRepositoryCoverage(coverage);
+      setApiRepositoryRisk(risk);
+      setApiImpactAnalysis(summary.latestImpactAnalysis ?? null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load API repository intelligence.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const connectApiRepository = async () => {
+    if (!canImport) {
+      toast.error("You do not have permission to connect backend repositories.");
+      return;
+    }
+    if (!apiRepositoryForm.owner || !apiRepositoryForm.repo || !apiRepositoryForm.token) {
+      toast.error("Repository owner, name, and GitHub token are required.");
+      return;
+    }
+    setIsScanningApiRepository(true);
+    try {
+      const profile = await projectApi.connectApiRepository({
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        ...apiRepositoryForm,
+      });
+      setApiRepositoryForm((value) => ({ ...value, token: "" }));
+      setSelectedApiRepositoryId(profile.id);
+      toast.success("Backend repository connected.");
+      const scan = await projectApi.scanApiRepository(profile.id);
+      setApiRepositories((items) => [scan.profile, ...items.filter((item) => item.id !== scan.profile.id)]);
+      setApiRouteMappings(scan.mappings);
+      setApiDependencyGraph(await projectApi.getApiRepositoryDependencyGraph(scan.profile.id));
+      setApiRepositoryCoverage(await projectApi.getApiRepositoryCoverage(scan.profile.id));
+      setApiRepositoryRisk(await projectApi.getApiRepositoryRiskSummary(scan.profile.id));
+      toast.success(`Detected ${scan.profile.totalEndpoints} API routes.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to connect or scan backend repository.");
+    } finally {
+      setIsScanningApiRepository(false);
+    }
+  };
+
+  const scanApiRepository = async () => {
+    if (!selectedApiRepository) return;
+    setIsScanningApiRepository(true);
+    try {
+      const scan = await projectApi.scanApiRepository(selectedApiRepository.id);
+      setApiRepositories((items) => [scan.profile, ...items.filter((item) => item.id !== scan.profile.id)]);
+      setApiRouteMappings(scan.mappings);
+      setApiDependencyGraph(await projectApi.getApiRepositoryDependencyGraph(scan.profile.id));
+      setApiRepositoryCoverage(await projectApi.getApiRepositoryCoverage(scan.profile.id));
+      setApiRepositoryRisk(await projectApi.getApiRepositoryRiskSummary(scan.profile.id));
+      toast.success(`Repository scan completed: ${scan.profile.totalEndpoints} APIs detected.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Repository scan failed.");
+    } finally {
+      setIsScanningApiRepository(false);
+    }
+  };
+
+  const runApiImpactAnalysis = async () => {
+    if (!selectedApiRepository) return;
+    const changedFiles = apiChangedFiles
+      .split(/\r?\n|,/)
+      .map((file) => file.trim())
+      .filter(Boolean);
+    if (!changedFiles.length) {
+      toast.error("Add at least one changed backend file.");
+      return;
+    }
+    setIsAnalyzingApiImpact(true);
+    try {
+      const analysis = await projectApi.runApiRepositoryImpactAnalysis(selectedApiRepository.id, { changedFiles });
+      setApiImpactAnalysis(analysis);
+      toast.success(`${analysis.affectedEndpoints.length} impacted APIs detected.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "API impact analysis failed.");
+    } finally {
+      setIsAnalyzingApiImpact(false);
     }
   };
 
@@ -4345,6 +4542,103 @@ function ApiWorkspacePage({
     }
   };
 
+  const refreshApiValidation = async (validationId: string) => {
+    const response = await projectApi.getApiValidation(validationId);
+    setSelectedApiValidation(response.validationRun);
+    setApiValidationResults(response.results);
+    setApiValidations((items) => [response.validationRun, ...items.filter((item) => item.id !== response.validationRun.id)]);
+    const failurePayload = await projectApi.getApiFailureAnalysisByValidation(validationId).catch(() => null);
+    setApiFailureAnalysis(failurePayload?.analysis ?? null);
+    setApiFailureEvidence(failurePayload?.evidence ?? []);
+    return response.validationRun;
+  };
+
+  const refreshApiValidationHistory = async () => {
+    const history = await projectApi.listApiValidations({ workspaceId, apiWorkspaceId: selectedWorkspace?.id });
+    setApiValidations(history);
+    if (!selectedApiValidation && history[0]) setSelectedApiValidation(history[0]);
+  };
+
+  const runApiGithubValidation = async (scope: "suite" | "workspace" | "endpoint", endpoint?: ApiEndpoint) => {
+    setIsRunningApiValidation(true);
+    try {
+      const input = {
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        apiWorkspaceId: selectedWorkspace?.id,
+        validationMode: apiValidationMode,
+        framework: apiFramework,
+        environment: apiValidationEnvironment,
+        variables: {
+          BASE_URL: runnerBaseUrl || selectedWorkspace?.serverUrls?.[0] || "",
+          API_TOKEN: runnerToken,
+          API_KEY: runnerApiKey,
+        },
+      };
+      const run = scope === "suite" && generatedSuite
+        ? await projectApi.runApiValidation({ ...input, generatedSuiteId: generatedSuite.id, triggerSource: "Generated API Test Suite" })
+        : scope === "endpoint" && endpoint
+          ? await projectApi.runApiEndpointValidation(endpoint.id, input)
+          : selectedWorkspace
+            ? await projectApi.runApiWorkspaceValidation(selectedWorkspace.id, input)
+            : await projectApi.runApiValidation({ ...input, triggerSource: "API Validation" });
+      setSelectedApiValidation(run);
+      setApiValidationResults([]);
+      setApiFailureAnalysis(null);
+      setApiFailureEvidence([]);
+      setApiValidations((items) => [run, ...items.filter((item) => item.id !== run.id)]);
+      toast.success("API GitHub validation started.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to start API validation.");
+    } finally {
+      setIsRunningApiValidation(false);
+    }
+  };
+
+  const retryApiGithubValidation = async () => {
+    if (!selectedApiValidation) return;
+    setIsRunningApiValidation(true);
+    try {
+      const run = await projectApi.retryApiValidation(selectedApiValidation.id, {
+        variables: {
+          BASE_URL: runnerBaseUrl || selectedWorkspace?.serverUrls?.[0] || "",
+          API_TOKEN: runnerToken,
+          API_KEY: runnerApiKey,
+        },
+      });
+      setSelectedApiValidation(run);
+      setApiValidationResults([]);
+      setApiFailureAnalysis(null);
+      setApiFailureEvidence([]);
+      setApiValidations((items) => [run, ...items.filter((item) => item.id !== run.id)]);
+      toast.success("API validation retry started.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to retry API validation.");
+    } finally {
+      setIsRunningApiValidation(false);
+    }
+  };
+
+  const analyzeSelectedApiFailure = async (regenerate = false) => {
+    if (!selectedApiValidation) return;
+    setIsAnalyzingApiFailure(true);
+    try {
+      const payload = regenerate
+        ? await projectApi.regenerateApiFailureAnalysis({
+          analysisId: apiFailureAnalysis?.id,
+          validationRunId: selectedApiValidation.id,
+        })
+        : await projectApi.analyzeApiValidationFailure(selectedApiValidation.id);
+      setApiFailureAnalysis(payload.analysis);
+      setApiFailureEvidence(payload.evidence);
+      toast.success(regenerate ? "API failure analysis regenerated." : "API failure analysis completed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to analyze API failure.");
+    } finally {
+      setIsAnalyzingApiFailure(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 rounded-[2rem] border bg-card/90 p-6 shadow-sm lg:flex-row lg:items-end lg:justify-between">
@@ -4518,6 +4812,526 @@ function ApiWorkspacePage({
           </div>
         </Card>
       </div>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">API Repository Intelligence</Badge>
+            <h2 className="font-display text-xl font-semibold">Backend/API Repository Map</h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              Connect backend repositories, detect routes/controllers/services/schemas, map API tests, and understand API impact from code changes.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => void scanApiRepository()} disabled={!selectedApiRepository || isScanningApiRepository}>
+              {isScanningApiRepository ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              Scan Repository
+            </Button>
+            <Button variant="outline" disabled={!selectedApiRepository}>
+              <ListChecks className="size-4" />
+              Generate Missing API Tests
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.25fr]">
+          <div className="space-y-4">
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="font-semibold">Connect Backend Repository</p>
+              <p className="mt-1 text-sm text-muted-foreground">GitHub token is encrypted in the backend and used only for repository scanning.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <Input value={apiRepositoryForm.owner} onChange={(event) => setApiRepositoryForm((value) => ({ ...value, owner: event.target.value }))} placeholder="Repository owner" />
+                <Input value={apiRepositoryForm.repo} onChange={(event) => setApiRepositoryForm((value) => ({ ...value, repo: event.target.value }))} placeholder="Backend repository" />
+                <Input value={apiRepositoryForm.defaultBranch} onChange={(event) => setApiRepositoryForm((value) => ({ ...value, defaultBranch: event.target.value }))} placeholder="Default branch" />
+                <Input type="password" value={apiRepositoryForm.token} onChange={(event) => setApiRepositoryForm((value) => ({ ...value, token: event.target.value }))} placeholder="GitHub token / PAT" />
+                <Button className="sm:col-span-2" onClick={() => void connectApiRepository()} disabled={!canImport || isScanningApiRepository}>
+                  {isScanningApiRepository ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />}
+                  Connect & Scan Repository
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">Connected Backend Repositories</p>
+                  <p className="text-sm text-muted-foreground">{apiRepositories.length} connected repositories</p>
+                </div>
+                <Badge variant="outline">{selectedApiRepository?.framework ?? "No repo"}</Badge>
+              </div>
+              <div className="mt-3 max-h-64 space-y-2 overflow-auto">
+                {apiRepositories.map((repository) => (
+                  <button
+                    key={repository.id}
+                    type="button"
+                    onClick={() => void selectApiRepository(repository.id)}
+                    className={cn(
+                      "w-full rounded-xl border bg-background p-3 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                      selectedApiRepository?.id === repository.id && "border-primary/50 bg-primary/5",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold">{repository.repositoryName}</p>
+                      <Badge variant="outline" className={repository.coverageScore >= 80 ? "border-emerald-200 bg-emerald-50 text-emerald-700" : repository.coverageScore >= 50 ? "border-amber-200 bg-amber-50 text-amber-700" : "border-red-200 bg-red-50 text-red-700"}>
+                        {repository.coverageScore}% coverage
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {repository.framework} · {repository.language} · {repository.totalEndpoints} APIs · {repository.lastScannedAt ? `Scanned ${formatDate(repository.lastScannedAt)}` : "Not scanned"}
+                    </p>
+                  </button>
+                ))}
+                {!apiRepositories.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No backend repositories connected yet.</p>}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniStat label="Framework" value={selectedApiRepository?.framework ?? "Unknown"} />
+              <MiniStat label="APIs Detected" value={selectedApiRepository?.totalEndpoints ?? 0} />
+              <MiniStat label="Auth APIs" value={selectedApiRepository?.protectedEndpoints ?? 0} />
+              <MiniStat label="High Risk" value={selectedApiRepository?.highRiskEndpoints ?? 0} />
+              <MiniStat label="Coverage Score" value={`${apiRepositoryCoverage?.coverageScore ?? selectedApiRepository?.coverageScore ?? 0}%`} />
+              <MiniStat label="Controllers" value={selectedApiRepository?.controllerDirectories.length ?? 0} />
+              <MiniStat label="Services" value={selectedApiRepository?.serviceDirectories.length ?? 0} />
+              <MiniStat label="DTO/Schemas" value={selectedApiRepository?.dtoDirectories.length ?? 0} />
+            </div>
+
+            <Tabs defaultValue="map">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="map">API Map</TabsTrigger>
+                <TabsTrigger value="graph">Dependency Graph</TabsTrigger>
+                <TabsTrigger value="impact">Impact</TabsTrigger>
+                <TabsTrigger value="coverage">Coverage</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="map" className="mt-4">
+                <div className="rounded-2xl border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold">Detected Routes</p>
+                    <Badge variant="outline">{apiRouteMappings.length} endpoints</Badge>
+                  </div>
+                  <div className="mt-3 max-h-96 overflow-auto">
+                    <table className="w-full min-w-[760px] text-left text-sm">
+                      <thead className="sticky top-0 bg-muted text-xs uppercase text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2">Method</th>
+                          <th className="px-3 py-2">Endpoint</th>
+                          <th className="px-3 py-2">Controller</th>
+                          <th className="px-3 py-2">Auth</th>
+                          <th className="px-3 py-2">Risk</th>
+                          <th className="px-3 py-2">Tests</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {apiRouteMappings.map((route) => (
+                          <tr key={route.id} className="border-b last:border-0">
+                            <td className="px-3 py-2 font-mono text-xs font-semibold">{route.method}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{route.path}</td>
+                            <td className="px-3 py-2 text-xs">{route.controllerFile ?? "Not detected"}{route.lineNumber ? `:${route.lineNumber}` : ""}</td>
+                            <td className="px-3 py-2"><Badge variant="outline">{route.authRequired ? "Protected" : "Public"}</Badge></td>
+                            <td className="px-3 py-2"><RiskBadge risk={route.riskLevel} /></td>
+                            <td className="px-3 py-2 text-xs">{route.testFiles.length ? `${route.testFiles.length} mapped` : "Missing"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {!apiRouteMappings.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">Scan a backend repository to detect API routes.</p>}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="graph" className="mt-4">
+                <div className="max-h-96 space-y-3 overflow-auto rounded-2xl border bg-muted/20 p-4">
+                  {apiDependencyGraph.map((module) => (
+                    <div key={module.moduleName} className="rounded-xl border bg-background p-3">
+                      <p className="font-semibold capitalize">{module.moduleName} Module</p>
+                      <div className="mt-2 space-y-2">
+                        {module.endpoints.map((endpoint) => (
+                          <div key={`${endpoint.method}-${endpoint.path}`} className="rounded-lg bg-muted/40 p-3 text-sm">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline">{endpoint.method}</Badge>
+                              <span className="font-mono text-xs">{endpoint.path}</span>
+                              <RiskBadge risk={endpoint.riskLevel} />
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">Controller: {endpoint.controller || "Not detected"}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">Services: {endpoint.services.join(", ") || "Not mapped"}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">Tests: {endpoint.tests.join(", ") || "No mapped tests"}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {!apiDependencyGraph.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">Dependency graph appears after a repository scan.</p>}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="impact" className="mt-4">
+                <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <p className="font-semibold">Changed Backend Files</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Paste changed files from a commit, PR, or webhook event. One file per line.</p>
+                    <Textarea
+                      className="mt-3 font-mono text-xs"
+                      rows={8}
+                      value={apiChangedFiles}
+                      onChange={(event) => setApiChangedFiles(event.target.value)}
+                      placeholder={"src/auth/auth.service.ts\nsrc/auth/auth.controller.ts\nsrc/auth/dto/login.dto.ts"}
+                    />
+                    <Button className="mt-3 w-full" onClick={() => void runApiImpactAnalysis()} disabled={!selectedApiRepository || isAnalyzingApiImpact}>
+                      {isAnalyzingApiImpact ? <Loader2 className="size-4 animate-spin" /> : <SearchCheck className="size-4" />}
+                      Run API Impact Analysis
+                    </Button>
+                  </div>
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold">Impact Result</p>
+                      {apiImpactAnalysis && <RiskBadge risk={apiImpactAnalysis.riskLevel} />}
+                    </div>
+                    {apiImpactAnalysis ? (
+                      <div className="mt-3 space-y-3">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <MiniStat label="Impacted APIs" value={apiImpactAnalysis.affectedEndpoints.length} />
+                          <MiniStat label="Affected Tests" value={apiImpactAnalysis.affectedTests.length} />
+                          <MiniStat label="Confidence" value={`${apiImpactAnalysis.confidenceScore}%`} />
+                        </div>
+                        <ImpactList title="Affected Endpoints" items={apiImpactAnalysis.affectedEndpoints} />
+                        <ImpactList title="Affected Services" items={apiImpactAnalysis.affectedServices} />
+                        <ImpactList title="Affected Schemas" items={apiImpactAnalysis.affectedSchemas} />
+                        <ImpactList title="Recommended Actions" items={apiImpactAnalysis.recommendations} />
+                      </div>
+                    ) : (
+                      <p className="mt-3 rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No API impact analysis yet.</p>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="coverage" className="mt-4">
+                <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <p className="font-semibold">API Coverage Intelligence</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <MiniStat label="With Tests" value={apiRepositoryCoverage?.endpointsWithTests ?? 0} />
+                      <MiniStat label="Without Tests" value={apiRepositoryCoverage?.endpointsWithoutTests ?? 0} />
+                      <MiniStat label="High Risk Coverage" value={`${apiRepositoryCoverage?.highRiskEndpointCoverage ?? 0}%`} />
+                      <MiniStat label="Protected APIs" value={apiRepositoryCoverage?.authCoverage ?? 0} />
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <p className="font-semibold">Risk Summary</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                      <MiniStat label="High" value={apiRepositoryRisk?.high ?? 0} />
+                      <MiniStat label="Medium" value={apiRepositoryRisk?.medium ?? 0} />
+                      <MiniStat label="Low" value={apiRepositoryRisk?.low ?? 0} />
+                      <MiniStat label="Protected" value={apiRepositoryRisk?.protectedEndpoints ?? 0} />
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {(apiRepositoryRisk?.recommendations ?? []).map((recommendation) => (
+                        <div key={recommendation} className="rounded-xl border bg-background p-3 text-sm">{recommendation}</div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">API GitHub Validation</Badge>
+            <h2 className="font-display text-xl font-semibold">Validate API Tests with GitHub Actions</h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              Commit approved API tests to a validation branch, trigger GitHub Actions, track execution progress, and feed results into AI analysis and release readiness.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void runApiGithubValidation("suite")} disabled={isRunningApiValidation || !generatedSuite}>
+              {isRunningApiValidation ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+              Run Suite Validation
+            </Button>
+            <Button variant="outline" onClick={() => void runApiGithubValidation("workspace")} disabled={isRunningApiValidation || !selectedWorkspace}>
+              <Network className="size-4" />
+              Validate Workspace
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[0.78fr_1.22fr]">
+          <div className="space-y-4">
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="font-semibold">Validation Settings</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Mode</label>
+                  <Select value={apiValidationMode} onValueChange={(value) => setApiValidationMode(value as ApiValidationMode)}>
+                    <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="quick">Quick Validation</SelectItem>
+                      <SelectItem value="impact">Impact Validation</SelectItem>
+                      <SelectItem value="full">Full Validation</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Environment</label>
+                  <Select value={apiValidationEnvironment} onValueChange={setApiValidationEnvironment}>
+                    <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["Local", "Development", "QA", "UAT", "Staging", "Production"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-3 rounded-xl border bg-background p-3 text-xs text-muted-foreground">
+                Uses the connected Automation Repository and `.github/workflows/api-validation.yml`. Secrets are passed as variables and masked by GitHub.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold">Validation History</p>
+                <Button variant="outline" size="sm" onClick={() => void refreshApiValidationHistory()}>Refresh</Button>
+              </div>
+              <div className="mt-3 max-h-80 space-y-2 overflow-auto">
+                {apiValidations.map((run) => (
+                  <button
+                    key={run.id}
+                    type="button"
+                    onClick={() => void refreshApiValidation(run.id)}
+                    className={cn(
+                      "w-full rounded-xl border bg-background p-3 text-left transition hover:border-primary/40",
+                      selectedApiValidation?.id === run.id && "border-primary/50 bg-primary/5",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate font-semibold">{run.triggerSource}</p>
+                      <ApiValidationStatusBadge status={run.status} />
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{run.framework} · {run.environment} · {formatValidationDuration(run.duration)} · {formatDate(run.createdAt)}</p>
+                  </button>
+                ))}
+                {!apiValidations.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No API validations yet.</p>}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-semibold">Validation Result</p>
+                  <p className="text-sm text-muted-foreground">GitHub Actions execution, progress, reports, logs, and AI recommendation.</p>
+                </div>
+                {selectedApiValidation && <ApiValidationStatusBadge status={selectedApiValidation.status} />}
+              </div>
+
+              {selectedApiValidation ? (
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between text-sm">
+                      <span>{selectedApiValidation.currentStep}</span>
+                      <span>{selectedApiValidation.progress}%</span>
+                    </div>
+                    <Progress value={selectedApiValidation.progress} className="h-2.5" />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <MiniStat label="Status" value={selectedApiValidation.status} />
+                    <MiniStat label="Mode" value={selectedApiValidation.validationMode} />
+                    <MiniStat label="Framework" value={selectedApiValidation.framework} />
+                    <MiniStat label="Environment" value={selectedApiValidation.environment} />
+                    <MiniStat label="Passed APIs" value={selectedApiValidation.passedTests} />
+                    <MiniStat label="Failed APIs" value={selectedApiValidation.failedTests} />
+                    <MiniStat label="Skipped" value={selectedApiValidation.skippedTests} />
+                    <MiniStat label="Duration" value={formatValidationDuration(selectedApiValidation.duration)} />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CopyableValue label="Validation Branch" value={selectedApiValidation.branch} />
+                    <CopyableValue label="Workflow Run ID" value={selectedApiValidation.workflowRunId ? String(selectedApiValidation.workflowRunId) : "-"} href={selectedApiValidation.workflowUrl} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={() => void refreshApiValidation(selectedApiValidation.id)}>
+                      <RefreshCw className="size-4" />
+                      Poll Result
+                    </Button>
+                    <Button variant="outline" onClick={() => void retryApiGithubValidation()} disabled={isRunningApiValidation}>
+                      <RefreshCw className="size-4" />
+                      Retry Validation
+                    </Button>
+                    <Button variant="outline" disabled={!selectedApiValidation.workflowUrl} onClick={() => selectedApiValidation.workflowUrl && window.open(selectedApiValidation.workflowUrl, "_blank")}>
+                      <ExternalLink className="size-4" />
+                      Open Workflow
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void analyzeSelectedApiFailure(false)}
+                      disabled={isAnalyzingApiFailure || !["Failed", "Error"].includes(selectedApiValidation.status)}
+                    >
+                      {isAnalyzingApiFailure ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+                      Analyze Failure
+                    </Button>
+                    <Button variant="outline" disabled>
+                      <Wand2 className="size-4" />
+                      Generate Auto Fix Soon
+                    </Button>
+                  </div>
+                  <div className="rounded-xl border bg-background p-3 text-sm">
+                    <p className="font-semibold">AI Recommendation</p>
+                    <p className="mt-1 text-muted-foreground">{selectedApiValidation.aiRecommendation || "Recommendation will be available after validation completes."}</p>
+                  </div>
+                  {selectedApiValidation.status === "Failed" && !apiFailureAnalysis && (
+                    <div className="rounded-xl border border-dashed bg-background p-4 text-sm text-muted-foreground">
+                      <p className="font-semibold text-foreground">API Failure Analysis</p>
+                      <p className="mt-1">Run AI analysis to identify the likely root cause, impacted APIs, backend files, tests, and recommended next actions.</p>
+                    </div>
+                  )}
+                  {apiFailureAnalysis && (
+                    <div className="space-y-4 rounded-2xl border bg-background p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <Badge variant="outline" className="mb-2 border-primary/30 bg-primary/10 text-primary">API Failure Analysis</Badge>
+                          <h3 className="font-display text-lg font-semibold">{apiFailureAnalysis.failureCategory}</h3>
+                          <p className="mt-1 text-sm text-muted-foreground">{apiFailureAnalysis.rootCause}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "capitalize",
+                              apiFailureAnalysis.severity === "Critical" && "border-red-700 bg-red-950/10 text-red-700",
+                              apiFailureAnalysis.severity === "High" && "border-red-500 bg-red-500/10 text-red-600",
+                              apiFailureAnalysis.severity === "Medium" && "border-amber-500 bg-amber-500/10 text-amber-700",
+                              apiFailureAnalysis.severity === "Low" && "border-emerald-500 bg-emerald-500/10 text-emerald-700",
+                            )}
+                          >
+                            {apiFailureAnalysis.severity} severity
+                          </Badge>
+                          <Badge variant="outline">{apiFailureAnalysis.confidenceScore}% confidence</Badge>
+                          <Badge variant="outline">{apiFailureAnalysis.autoFixPossible ? "Auto fix possible" : "Manual review"}</Badge>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <MiniStat label="Impacted APIs" value={apiFailureAnalysis.impactedApis.length} />
+                        <MiniStat label="Impacted Tests" value={apiFailureAnalysis.impactedTests.length} />
+                        <MiniStat label="Backend Files" value={apiFailureAnalysis.impactedBackendFiles.length} />
+                        <MiniStat label="Evidence Items" value={apiFailureEvidence.length || apiFailureAnalysis.evidence.length} />
+                      </div>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border bg-muted/20 p-3">
+                          <p className="font-semibold">Failure Summary</p>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{apiFailureAnalysis.responseSummary || apiFailureAnalysis.requestSummary}</p>
+                        </div>
+                        <div className="rounded-xl border bg-muted/20 p-3">
+                          <p className="font-semibold">Recommended Actions</p>
+                          <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+                            {apiFailureAnalysis.recommendations.map((item) => (
+                              <li key={item} className="flex gap-2">
+                                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                      <div className="grid gap-4 lg:grid-cols-3">
+                        <ImpactList title="Impacted APIs" items={apiFailureAnalysis.impactedApis} empty="No impacted APIs detected." />
+                        <ImpactList title="Impacted Tests" items={apiFailureAnalysis.impactedTests} empty="No mapped API tests detected." />
+                        <ImpactList title="Backend Files" items={apiFailureAnalysis.impactedBackendFiles} empty="No backend files mapped yet." />
+                      </div>
+                      <div className="rounded-xl border bg-muted/20 p-3">
+                        <p className="font-semibold">Evidence Timeline</p>
+                        <div className="mt-3 space-y-2">
+                          {(apiFailureEvidence.length ? apiFailureEvidence : apiFailureAnalysis.evidence.map((summary, index) => ({
+                            id: `${apiFailureAnalysis.id}-${index}`,
+                            analysisId: apiFailureAnalysis.id,
+                            sourceType: "analysis",
+                            sourceReference: apiFailureAnalysis.id,
+                            evidenceType: "Evidence",
+                            summary,
+                            confidence: apiFailureAnalysis.confidenceScore,
+                            createdAt: apiFailureAnalysis.createdAt,
+                          }))).map((item) => (
+                            <div key={item.id} className="rounded-lg border bg-background p-3 text-sm">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="font-medium">{item.evidenceType}</p>
+                                <Badge variant="outline">{item.confidence}%</Badge>
+                              </div>
+                              <p className="mt-1 text-muted-foreground">{item.summary}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{item.sourceType} · {item.sourceReference}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => void analyzeSelectedApiFailure(true)} disabled={isAnalyzingApiFailure}>
+                          {isAnalyzingApiFailure ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                          Regenerate Analysis
+                        </Button>
+                        <Button variant="outline" onClick={() => navigator.clipboard.writeText(`${apiFailureAnalysis.rootCause}\n\n${apiFailureAnalysis.recommendations.join("\n")}`)}>
+                          <Copy className="size-4" />
+                          Copy Summary
+                        </Button>
+                        <Button variant="outline" disabled>
+                          <Wand2 className="size-4" />
+                          Generate AI Auto Fix Soon
+                        </Button>
+                        <Button variant="outline" onClick={() => void retryApiGithubValidation()} disabled={isRunningApiValidation}>
+                          <RefreshCw className="size-4" />
+                          Retry Validation
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-4 rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">Run API validation to see GitHub Actions status and reports.</p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="font-semibold">Failed and Passed APIs</p>
+              <div className="mt-3 max-h-72 overflow-auto">
+                <table className="w-full min-w-[680px] text-left text-sm">
+                  <thead className="bg-muted text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2">Method</th>
+                      <th className="px-3 py-2">Endpoint</th>
+                      <th className="px-3 py-2">Expected</th>
+                      <th className="px-3 py-2">Actual</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Failure</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {apiValidationResults.map((result) => (
+                      <tr key={result.id} className="border-b last:border-0">
+                        <td className="px-3 py-2 font-mono text-xs">{result.method}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{result.endpoint}</td>
+                        <td className="px-3 py-2">{result.expectedStatus ?? "-"}</td>
+                        <td className="px-3 py-2">{result.actualStatus ?? "-"}</td>
+                        <td className="px-3 py-2"><Badge variant="outline">{result.status}</Badge></td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{result.failureReason ?? "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!apiValidationResults.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No API validation result rows selected yet.</p>}
+              </div>
+            </div>
+
+            {selectedApiValidation && (
+              <details className="rounded-2xl border bg-muted/20 p-4">
+                <summary className="cursor-pointer font-semibold">Validation Logs</summary>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs text-slate-100">{selectedApiValidation.logs || "Logs will appear after the workflow starts."}</pre>
+              </details>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <Card className="p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -9919,6 +10733,8 @@ function AnalyticsDashboardPage({
   };
   const selectedProjectModules = filters.projectId && projectDetail?.project.id === filters.projectId ? projectDetail.modules : [];
   const [isQualityRecalculating, setIsQualityRecalculating] = useState(false);
+  const [isApiInsightsGenerating, setIsApiInsightsGenerating] = useState(false);
+  const [apiInsights, setApiInsights] = useState<string[]>([]);
   const qualityTone = (score: number) =>
     score >= 90
       ? "border-success/40 bg-success/10 text-success"
@@ -9937,6 +10753,19 @@ function AnalyticsDashboardPage({
       toast.error(error instanceof Error ? error.message : "Failed to recalculate AI quality metrics");
     } finally {
       setIsQualityRecalculating(false);
+    }
+  };
+  const generateApiInsights = async () => {
+    try {
+      setIsApiInsightsGenerating(true);
+      const result = await projectApi.generateApiAnalyticsInsights(filters);
+      setApiInsights(result.insights);
+      toast.success("AI API insights generated");
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate API insights");
+    } finally {
+      setIsApiInsightsGenerating(false);
     }
   };
 
@@ -10149,6 +10978,121 @@ function AnalyticsDashboardPage({
             </div>
           </Card>
 
+          <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Network className="size-4 text-primary" />
+                  API Analytics
+                </div>
+                <h2 className="mt-2 font-display text-2xl font-semibold">API health, validation, contracts, and release risk</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  Measure API coverage, GitHub validation health, runner performance, contract compatibility, high-risk endpoints, and release readiness signals.
+                </p>
+              </div>
+              <Button variant="outline" onClick={generateApiInsights} disabled={isApiInsightsGenerating}>
+                {isApiInsightsGenerating ? <Loader2 className="size-4 animate-spin" /> : <Brain className="size-4" />}
+                Generate AI API Insights
+              </Button>
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-[0.78fr_1.22fr]">
+              <div className={cn("rounded-xl border p-5", apiHealthTone(analytics.apiAnalytics.summary.apiHealthScore))}>
+                <p className="text-sm font-semibold uppercase tracking-wide">API Health Score</p>
+                <div className="mt-3 flex items-end gap-3">
+                  <span className="font-display text-6xl font-bold">{analytics.apiAnalytics.summary.apiHealthScore}</span>
+                  <span className="pb-2 text-lg font-semibold">/ 100</span>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Badge variant="outline" className={apiHealthTone(analytics.apiAnalytics.summary.apiHealthScore)}>
+                    {analytics.apiAnalytics.summary.apiHealthLabel}
+                  </Badge>
+                  <Badge variant="outline" className={apiRiskTone(analytics.apiAnalytics.summary.releaseRisk)}>
+                    Release Risk: {analytics.apiAnalytics.summary.releaseRisk}
+                  </Badge>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {(apiInsights.length ? apiInsights : analytics.apiAnalytics.aiInsights).slice(0, 5).map((insight) => (
+                    <div key={insight} className="rounded-lg bg-background/70 p-3 text-sm leading-6 text-foreground">
+                      {insight}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MiniStat label="Total APIs" value={analytics.apiAnalytics.summary.totalApis} />
+                <MiniStat label="APIs Tested" value={analytics.apiAnalytics.summary.testedApis} />
+                <MiniStat label="APIs Not Tested" value={analytics.apiAnalytics.summary.untestedApis} />
+                <MiniStat label="Passed APIs" value={analytics.apiAnalytics.summary.passedApis} />
+                <MiniStat label="Failed APIs" value={analytics.apiAnalytics.summary.failedApis} />
+                <MiniStat label="Avg Response" value={`${analytics.apiAnalytics.summary.averageResponseTime} ms`} />
+                <MiniStat label="p95 Response" value={`${analytics.apiAnalytics.summary.p95ResponseTime} ms`} />
+                <MiniStat label="Contract Failures" value={analytics.apiAnalytics.summary.contractFailures} />
+                <MiniStat label="Breaking Changes" value={analytics.apiAnalytics.summary.breakingChanges} />
+                <MiniStat label="API Coverage" value={`${analytics.apiAnalytics.summary.apiCoverage}%`} />
+                <MiniStat label="High-Risk APIs" value={analytics.apiAnalytics.summary.highRiskApis} />
+                <MiniStat label="Validation Success" value={`${analytics.apiAnalytics.summary.validationSuccessRate}%`} />
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              <ChartCard title="API Validation Pass/Fail Trend">
+                <ResponsiveContainer width="100%" height={260}>
+                  <AreaChart data={analytics.apiAnalytics.validation.trend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="passed" stackId="1" stroke="#22c55e" fill="#22c55e" fillOpacity={0.25} />
+                    <Area type="monotone" dataKey="failed" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.25} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </ChartCard>
+              <ChartCard title="Response Time Trend">
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={analytics.apiAnalytics.performance.trend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="averageResponseTime" name="Average" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="p95ResponseTime" name="p95" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartCard>
+              <ChartCard title="API Coverage by Module/Tag">
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={analytics.apiAnalytics.coverage.byTag.slice(0, 8)}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="tag" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Bar dataKey="coverage" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+              <ChartCard title="Contract Compatibility Trend">
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={analytics.apiAnalytics.contracts.trend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="compatibilityScore" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-4">
+              <ApiAnalyticsList title="Failed APIs" rows={analytics.apiAnalytics.drilldowns.failedApis.map((api) => [`${api.method} ${api.path}`, api.riskLevel])} empty="No failed APIs detected." />
+              <ApiAnalyticsList title="Slowest APIs" rows={analytics.apiAnalytics.drilldowns.slowestApis.map((api) => [`${api.method} ${api.endpoint}`, `${api.responseTime} ms`])} empty="No response-time data yet." />
+              <ApiAnalyticsList title="Contract Failures" rows={analytics.apiAnalytics.drilldowns.contractFailures.map((contract) => [contract.endpointId || contract.apiWorkspaceId || contract.id, `${contract.breakingChanges.length} changes`])} empty="No contract failures." />
+              <ApiAnalyticsList title="Untested APIs" rows={analytics.apiAnalytics.drilldowns.untestedApis.map((api) => [`${api.method} ${api.path}`, api.riskLevel])} empty="No untested APIs detected." />
+            </div>
+          </Card>
+
           <div className="grid gap-4 xl:grid-cols-2">
             <ChartCard title="Coverage Trend Over Time">
               <ResponsiveContainer width="100%" height={280}>
@@ -10304,6 +11248,36 @@ function ChartCard({ title, children }: { title: string; children: ReactNode }) 
     <Card className="border-border/50 bg-card/60 p-6 backdrop-blur">
       <h2 className="mb-4 font-display text-xl font-semibold">{title}</h2>
       {children}
+    </Card>
+  );
+}
+
+function apiHealthTone(score: number) {
+  if (score >= 95) return "border-success/40 bg-success/10 text-success";
+  if (score >= 85) return "border-primary/40 bg-primary/10 text-primary";
+  if (score >= 70) return "border-warning/40 bg-warning/10 text-warning";
+  return "border-destructive/40 bg-destructive/10 text-destructive";
+}
+
+function apiRiskTone(risk: ApiAnalyticsSummary["summary"]["releaseRisk"]) {
+  if (risk === "Low") return "border-success/40 bg-success/10 text-success";
+  if (risk === "Medium") return "border-warning/40 bg-warning/10 text-warning";
+  if (risk === "High") return "border-destructive/40 bg-destructive/10 text-destructive";
+  return "border-red-900/40 bg-red-900/10 text-red-900";
+}
+
+function ApiAnalyticsList({ title, rows, empty }: { title: string; rows: Array<[string, string | number]>; empty: string }) {
+  return (
+    <Card className="border-border/50 bg-card/60 p-4 backdrop-blur">
+      <h3 className="font-display text-base font-semibold">{title}</h3>
+      <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+        {rows.length ? rows.slice(0, 10).map(([label, value]) => (
+          <div key={`${label}-${value}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-surface/40 px-3 py-2">
+            <span className="min-w-0 truncate text-sm">{label}</span>
+            <Badge variant="outline" className="shrink-0">{value}</Badge>
+          </div>
+        )) : <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">{empty}</p>}
+      </div>
     </Card>
   );
 }

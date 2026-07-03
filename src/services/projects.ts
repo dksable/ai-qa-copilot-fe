@@ -484,6 +484,16 @@ export type ApiWorkspaceFormat = "openapi3" | "swagger2" | "json" | "yaml";
 export type ApiImportStatus = "Pending" | "Completed" | "Failed";
 export type ApiAuthType = "Bearer token" | "Basic auth" | "API key header" | "API key query param" | "OAuth2" | "Digest" | "No auth";
 export type ApiRiskLevel = "Low" | "Medium" | "High";
+export type ApiRepositoryFramework =
+  | "Express"
+  | "NestJS"
+  | "Spring Boot"
+  | "FastAPI"
+  | "Fastify"
+  | "Django"
+  | ".NET Web API"
+  | "Laravel"
+  | "Unknown";
 export type PostmanSourceType = "upload" | "github" | "public_url";
 export type PostmanImportStatus = "Pending" | "Completed" | "Failed";
 export type PostmanVariableSource = "collection" | "environment" | "global" | "runtime";
@@ -493,6 +503,18 @@ export type ApiTestFramework = "playwright" | "axios" | "supertest";
 export type GeneratedApiTestStatus = "Pending" | "Approved" | "Rejected" | "Edited";
 export type ApiRunType = "endpoint" | "request" | "collection" | "generated_suite";
 export type ApiRunResultStatus = "Passed" | "Failed" | "Error";
+export type ApiValidationStatus = "Queued" | "Running" | "Passed" | "Failed" | "Cancelled" | "Error";
+export type ApiValidationMode = "quick" | "impact" | "full";
+export type ApiFailureCategory =
+  | "Authentication"
+  | "Authorization"
+  | "Validation Error"
+  | "HTTP Failure"
+  | "Contract Failure"
+  | "Performance Failure"
+  | "Infrastructure Failure"
+  | "Unknown";
+export type ApiFailureSeverity = "Low" | "Medium" | "High" | "Critical";
 export type ContractValidationStatus = "Passed" | "Failed" | "Warning";
 export type ContractChangeType = "Missing Field" | "Additional Field" | "Type Change" | "Status Code Change" | "Enum Change" | "Structure Change" | "Header Change";
 export type ContractSeverity = "Low" | "Medium" | "High" | "Critical";
@@ -1315,6 +1337,107 @@ export interface ApiCollectionRunResponse {
   };
 }
 
+export interface ApiValidationRun {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId?: string;
+  apiWorkspaceId?: string;
+  generatedSuiteId?: string;
+  endpointId?: string;
+  validationMode: ApiValidationMode;
+  framework: ApiTestFramework;
+  environment: string;
+  branch: string;
+  commitSha?: string;
+  workflowRunId?: number;
+  workflowUrl?: string;
+  workflowStatus?: string;
+  workflowConclusion?: string | null;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  skippedTests: number;
+  responseTimeAverage: number;
+  duration: number;
+  status: ApiValidationStatus;
+  progress: number;
+  currentStep: string;
+  reportUrls: string[];
+  logUrls: string[];
+  logs: string;
+  aiRecommendation?: string;
+  releaseImpact?: string;
+  triggerSource: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiValidationResult {
+  id: string;
+  validationRunId: string;
+  endpointId?: string;
+  method: string;
+  endpoint: string;
+  expectedStatus?: number;
+  actualStatus?: number;
+  responseTime?: number;
+  assertions: string[];
+  contractResult?: unknown;
+  status: "Passed" | "Failed" | "Skipped";
+  failureReason?: string;
+  createdAt: string;
+}
+
+export interface ApiValidationResponse {
+  validationRun: ApiValidationRun;
+  results: ApiValidationResult[];
+}
+
+export interface ApiFailureEvidence {
+  id: string;
+  analysisId: string;
+  sourceType: string;
+  sourceReference: string;
+  evidenceType: string;
+  summary: string;
+  confidence: number;
+  createdAt: string;
+}
+
+export interface ApiFailureAnalysis {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId?: string;
+  validationRunId?: string;
+  endpointId?: string;
+  failureCategory: ApiFailureCategory;
+  severity: ApiFailureSeverity;
+  rootCause: string;
+  confidenceScore: number;
+  impactedApis: string[];
+  impactedTests: string[];
+  impactedBackendFiles: string[];
+  impactedFrontendModules: string[];
+  requestSummary: string;
+  responseSummary: string;
+  evidence: string[];
+  recommendations: string[];
+  autoFixPossible: boolean;
+  aiProvider: string;
+  aiModel: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiFailureAnalysisResponse {
+  analysis: ApiFailureAnalysis;
+  evidence: ApiFailureEvidence[];
+}
+
 export interface ContractDifference {
   id: string;
   validationId: string;
@@ -1351,6 +1474,112 @@ export interface ApiContractValidation {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiRepositoryProfile {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId: string;
+  repositoryName: string;
+  provider: "github";
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  tokenMasked?: string;
+  framework: ApiRepositoryFramework;
+  language: string;
+  packageManager: string;
+  routeDirectories: string[];
+  controllerDirectories: string[];
+  serviceDirectories: string[];
+  dtoDirectories: string[];
+  testDirectories: string[];
+  totalEndpoints: number;
+  protectedEndpoints: number;
+  highRiskEndpoints: number;
+  coverageScore: number;
+  lastScannedCommit?: string;
+  lastScannedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiRouteMapping {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId: string;
+  method: string;
+  path: string;
+  controllerFile?: string;
+  controllerName?: string;
+  handlerName?: string;
+  serviceFiles: string[];
+  dtoFiles: string[];
+  schemaFiles: string[];
+  authRequired: boolean;
+  roles: string[];
+  riskLevel: ApiRiskLevel;
+  testFiles: string[];
+  lineNumber?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiImpactAnalysis {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId: string;
+  commitSha?: string;
+  changedFiles: string[];
+  affectedEndpoints: string[];
+  affectedControllers: string[];
+  affectedServices: string[];
+  affectedSchemas: string[];
+  affectedTests: string[];
+  riskLevel: ApiRiskLevel;
+  confidenceScore: number;
+  recommendations: string[];
+  createdAt: string;
+}
+
+export interface ApiRepositorySummary {
+  profile: ApiRepositoryProfile;
+  mappings: ApiRouteMapping[];
+  latestImpactAnalysis?: ApiImpactAnalysis | null;
+}
+
+export interface ApiRepositoryDependencyGraph {
+  moduleName: string;
+  endpoints: Array<{
+    method: string;
+    path: string;
+    controller?: string;
+    services: string[];
+    schemas: string[];
+    tests: string[];
+    riskLevel: ApiRiskLevel;
+  }>;
+}
+
+export interface ApiRepositoryCoverage {
+  totalEndpoints: number;
+  endpointsWithTests: number;
+  endpointsWithoutTests: number;
+  highRiskEndpointCoverage: number;
+  authCoverage: number;
+  coverageScore: number;
+  untestedEndpoints: ApiRouteMapping[];
+}
+
+export interface ApiRepositoryRiskSummary {
+  high: number;
+  medium: number;
+  low: number;
+  protectedEndpoints: number;
+  recommendations: string[];
 }
 
 export interface ContractDashboard {
@@ -1889,6 +2118,15 @@ export interface AnalyticsFilters {
   dateTo?: string;
 }
 
+export interface ApiAnalyticsFilters extends AnalyticsFilters {
+  apiWorkspaceId?: string;
+  repositoryId?: string;
+  environment?: string;
+  method?: string;
+  riskLevel?: ApiRiskLevel;
+  validationMode?: ApiValidationMode;
+}
+
 export interface AnalyticsSummary {
   totalProjects: number;
   totalModules: number;
@@ -2071,6 +2309,93 @@ export interface AIQualityGeneratedOutputDetail {
   title: string;
   validationResult: RepositoryValidationRun | null;
   improvementSuggestions: string[];
+}
+
+export interface ApiAnalyticsSummary {
+  summary: {
+    totalApis: number;
+    testedApis: number;
+    untestedApis: number;
+    passedApis: number;
+    failedApis: number;
+    averageResponseTime: number;
+    p50ResponseTime: number;
+    p90ResponseTime: number;
+    p95ResponseTime: number;
+    p99ResponseTime: number;
+    contractFailures: number;
+    breakingChanges: number;
+    apiCoverage: number;
+    apiHealthScore: number;
+    apiHealthLabel: "Excellent" | "Healthy" | "Needs Attention" | "High Risk";
+    highRiskApis: number;
+    highRiskFailures: number;
+    releaseRisk: "Low" | "Medium" | "High" | "Critical";
+    validationSuccessRate: number;
+    contractCompatibility: number;
+  };
+  coverage: {
+    totalEndpoints: number;
+    testedEndpoints: number;
+    untestedEndpointCount: number;
+    authEndpointCoverage: number;
+    highRiskEndpointCoverage: number;
+    negativeTestCoverage: number;
+    contractTestCoverage: number;
+    byTag: Array<{ tag: string; total: number; tested: number; coverage: number }>;
+    byRisk: Array<{ risk: ApiRiskLevel; total: number; tested: number; coverage: number }>;
+    untestedEndpoints: Array<{ method: string; path: string; riskLevel: ApiRiskLevel; tags: string[] }>;
+  };
+  validation: {
+    totalValidations: number;
+    passedValidations: number;
+    failedValidations: number;
+    skippedValidations: number;
+    averageDuration: number;
+    validationSuccessRate: number;
+    retrySuccessRate: number;
+    failureCategories: Array<{ endpoint: string; category: string }>;
+    trend: Array<{ date: string; passed: number; failed: number; total: number; averageDuration: number }>;
+    failedEndpoints: Array<{ method: string; path: string; riskLevel: ApiRiskLevel; tags: string[] }>;
+  };
+  performance: {
+    averageResponseTime: number;
+    p50ResponseTime: number;
+    p90ResponseTime: number;
+    p95ResponseTime: number;
+    p99ResponseTime: number;
+    slowestApis: Array<{ method: string; endpoint: string; responseTime: number; statusCode?: number }>;
+    fastestApis: Array<{ method: string; endpoint: string; responseTime: number; statusCode?: number }>;
+    errorRate: number;
+    trend: Array<{ date: string; averageResponseTime: number; p95ResponseTime: number }>;
+  };
+  contracts: {
+    totalContractValidations: number;
+    passedContractChecks: number;
+    failedContractChecks: number;
+    breakingChanges: number;
+    missingFields: number;
+    typeMismatches: number;
+    statusCodeMismatches: number;
+    compatibilityScore: number;
+    trend: Array<{ date: string; passed: number; failed: number; breakingChanges: number; compatibilityScore: number }>;
+    failures: ApiContractValidation[];
+  };
+  risks: {
+    highRiskApis: number;
+    highRiskCoverage: number;
+    highRiskFailures: number;
+    criticalApiFailures: number;
+    releaseBlockers: string[];
+    riskDistribution: Array<{ name: string; value: number }>;
+  };
+  aiInsights: string[];
+  drilldowns: {
+    failedApis: Array<{ method: string; path: string; riskLevel: ApiRiskLevel; tags: string[] }>;
+    slowestApis: Array<{ method: string; endpoint: string; responseTime: number; statusCode?: number }>;
+    contractFailures: ApiContractValidation[];
+    untestedApis: Array<{ method: string; path: string; riskLevel: ApiRiskLevel; tags: string[] }>;
+  };
 }
 
 export interface CreateProjectInput {
@@ -2436,6 +2761,82 @@ export const projectApi = {
   getApiRun: (runId: string) => apiRequest<ApiRun>(`/api/api-runner/runs/${runId}`),
   getApiRunLogs: (runId: string) => apiRequest<unknown>(`/api/api-runner/runs/${runId}/logs`),
   deleteApiRun: (runId: string) => apiRequest<void>(`/api/api-runner/runs/${runId}`, { method: "DELETE" }),
+  runApiValidation: (input: {
+    workspaceId?: string;
+    projectId?: string;
+    repositoryId?: string;
+    apiWorkspaceId?: string;
+    generatedSuiteId?: string;
+    endpointIds?: string[];
+    validationMode?: ApiValidationMode;
+    framework?: ApiTestFramework;
+    environment?: string;
+    variables?: Record<string, string>;
+    triggerSource?: string;
+  }) => apiRequest<ApiValidationRun>("/api/api-validation/run", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  runApiEndpointValidation: (endpointId: string, input: {
+    workspaceId?: string;
+    projectId?: string;
+    apiWorkspaceId?: string;
+    validationMode?: ApiValidationMode;
+    framework?: ApiTestFramework;
+    environment?: string;
+    variables?: Record<string, string>;
+  }) => apiRequest<ApiValidationRun>(`/api/api-validation/run-endpoint/${endpointId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  runApiWorkspaceValidation: (apiWorkspaceId: string, input: {
+    workspaceId?: string;
+    projectId?: string;
+    validationMode?: ApiValidationMode;
+    framework?: ApiTestFramework;
+    environment?: string;
+    variables?: Record<string, string>;
+  }) => apiRequest<ApiValidationRun>(`/api/api-validation/run-workspace/${apiWorkspaceId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  retryApiValidation: (validationId: string, input: { variables?: Record<string, string> } = {}) =>
+    apiRequest<ApiValidationRun>(`/api/api-validation/retry/${validationId}`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  getApiValidation: (validationId: string) => apiRequest<ApiValidationResponse>(`/api/api-validation/${validationId}`),
+  listApiValidations: (filters: { workspaceId?: string; projectId?: string; apiWorkspaceId?: string; status?: ApiValidationStatus } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.workspaceId) params.set("workspaceId", filters.workspaceId);
+    if (filters.projectId) params.set("projectId", filters.projectId);
+    if (filters.apiWorkspaceId) params.set("apiWorkspaceId", filters.apiWorkspaceId);
+    if (filters.status) params.set("status", filters.status);
+    const query = params.toString();
+    return apiRequest<ApiValidationRun[]>(`/api/api-validation/history${query ? `?${query}` : ""}`);
+  },
+  getApiValidationReport: (validationId: string) => apiRequest<{ reportUrls: string[]; workflowUrl?: string }>(`/api/api-validation/report/${validationId}`),
+  getApiValidationLogs: (validationId: string) => apiRequest<{ logs: string }>(`/api/api-validation/logs/${validationId}`),
+  analyzeApiFailure: (validationRunId: string, regenerate = false) =>
+    apiRequest<ApiFailureAnalysisResponse>("/api/api-failure-analysis/analyze", {
+      method: "POST",
+      body: JSON.stringify({ validationRunId, regenerate }),
+    }),
+  analyzeApiValidationFailure: (validationRunId: string) =>
+    apiRequest<ApiFailureAnalysisResponse>(`/api/api-failure-analysis/analyze-validation/${validationRunId}`, { method: "POST" }),
+  getApiFailureAnalysisByValidation: (validationRunId: string) =>
+    apiRequest<ApiFailureAnalysisResponse | null>(`/api/api-failure-analysis/by-validation/${validationRunId}`),
+  getApiFailureAnalysis: (analysisId: string) =>
+    apiRequest<ApiFailureAnalysisResponse>(`/api/api-failure-analysis/${analysisId}`),
+  getApiFailureHistory: (endpointId: string, workspaceId?: string) =>
+    apiRequest<ApiFailureAnalysis[]>(`/api/api-failure-analysis/history/${endpointId}${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
+  getApiFailureRecommendations: (analysisId: string) =>
+    apiRequest<{ recommendations: string[]; autoFixPossible: boolean }>(`/api/api-failure-analysis/recommendations/${analysisId}`),
+  regenerateApiFailureAnalysis: (input: { analysisId?: string; validationRunId?: string }) =>
+    apiRequest<ApiFailureAnalysisResponse>("/api/api-failure-analysis/regenerate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   validateApiContract: (input: { endpointId: string; runId?: string; actualStatusCode?: number; actualResponse?: unknown }) =>
     apiRequest<ApiContractValidation>("/api/contract-testing/validate", {
       method: "POST",
@@ -2453,6 +2854,25 @@ export const projectApi = {
   getApiContractCompatibility: (apiWorkspaceId: string) => apiRequest<ContractCompatibility>(`/api/contract-testing/compatibility/${apiWorkspaceId}`),
   getApiContractDashboard: (workspaceId?: string) =>
     apiRequest<ContractDashboard>(`/api/contract-testing/dashboard${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
+  connectApiRepository: (input: { workspaceId?: string; projectId?: string; owner: string; repo: string; defaultBranch?: string; token: string }) =>
+    apiRequest<ApiRepositoryProfile>("/api/api-repository/connect", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listApiRepositories: (workspaceId?: string) =>
+    apiRequest<ApiRepositoryProfile[]>(`/api/api-repository${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
+  scanApiRepository: (repositoryId: string) =>
+    apiRequest<{ profile: ApiRepositoryProfile; mappings: ApiRouteMapping[] }>(`/api/api-repository/${repositoryId}/scan`, { method: "POST" }),
+  getApiRepositorySummary: (repositoryId: string) => apiRequest<ApiRepositorySummary>(`/api/api-repository/${repositoryId}/summary`),
+  listApiRepositoryEndpoints: (repositoryId: string) => apiRequest<ApiRouteMapping[]>(`/api/api-repository/${repositoryId}/endpoints`),
+  getApiRepositoryDependencyGraph: (repositoryId: string) => apiRequest<ApiRepositoryDependencyGraph[]>(`/api/api-repository/${repositoryId}/dependency-graph`),
+  runApiRepositoryImpactAnalysis: (repositoryId: string, input: { changedFiles: string[]; commitSha?: string }) =>
+    apiRequest<ApiImpactAnalysis>(`/api/api-repository/${repositoryId}/impact-analysis`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  getApiRepositoryCoverage: (repositoryId: string) => apiRequest<ApiRepositoryCoverage>(`/api/api-repository/${repositoryId}/coverage`),
+  getApiRepositoryRiskSummary: (repositoryId: string) => apiRequest<ApiRepositoryRiskSummary>(`/api/api-repository/${repositoryId}/risk-summary`),
   listProjects: () => apiRequest<ProjectSummary[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     apiRequest<ProjectSummary>("/api/projects", {
@@ -2977,6 +3397,27 @@ export const projectApi = {
     apiRequest<AnalyticsAIUsage>(`/api/analytics/ai-usage${analyticsQueryString(filters)}`),
   getAnalyticsExports: (filters: AnalyticsFilters = {}) =>
     apiRequest<AnalyticsExports>(`/api/analytics/exports${analyticsQueryString(filters)}`),
+  getApiAnalyticsSummary: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary>(`/api/api-analytics/summary${analyticsQueryString(filters)}`),
+  getApiAnalyticsWorkspace: (apiWorkspaceId: string, filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary>(`/api/api-analytics/workspace/${apiWorkspaceId}${analyticsQueryString(filters)}`),
+  getApiAnalyticsProject: (projectId: string, filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary>(`/api/api-analytics/project/${projectId}${analyticsQueryString(filters)}`),
+  getApiAnalyticsCoverage: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary["coverage"]>(`/api/api-analytics/coverage${analyticsQueryString(filters)}`),
+  getApiAnalyticsValidationTrends: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary["validation"]>(`/api/api-analytics/validation-trends${analyticsQueryString(filters)}`),
+  getApiAnalyticsPerformance: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary["performance"]>(`/api/api-analytics/performance${analyticsQueryString(filters)}`),
+  getApiAnalyticsContracts: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary["contracts"]>(`/api/api-analytics/contracts${analyticsQueryString(filters)}`),
+  getApiAnalyticsRisks: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<ApiAnalyticsSummary["risks"]>(`/api/api-analytics/risks${analyticsQueryString(filters)}`),
+  generateApiAnalyticsInsights: (filters: ApiAnalyticsFilters = {}) =>
+    apiRequest<{ insights: string[]; summary: ApiAnalyticsSummary["summary"] }>("/api/api-analytics/ai-insights", {
+      method: "POST",
+      body: JSON.stringify(filters),
+    }),
   getAIQualitySummary: (filters: AIQualityFilters = {}) =>
     apiRequest<AIQualitySummary>(`/api/ai-quality/summary${aiQualityQueryString(filters)}`),
   getAIQualityProject: (projectId: string, filters: AIQualityFilters = {}) =>
