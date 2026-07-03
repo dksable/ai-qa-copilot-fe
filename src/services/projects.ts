@@ -41,6 +41,7 @@ export type AIProviderFeatureName =
   | "repository-impact"
   | "repository-test-update"
   | "playwright-validation-failure"
+  | "ai-failure-analysis"
   | "repository-fix-suggestion";
 export type AIProviderUsageStatus = "Success" | "Failed";
 export type PlaywrightValidationStatus = "Queued" | "Running" | "Passed" | "Failed" | "Warning" | "Error";
@@ -431,7 +432,7 @@ export type RepositoryImpactSuggestionCategory =
   | "API"
   | "UI";
 export type RepositoryGeneratedTestUpdateStatus = "Pending" | "Approved" | "Rejected" | "Edited";
-export type RepositoryValidationRunStatus = "Pending" | "Running" | "Passed" | "Failed" | "Cancelled" | "Completed" | "Error";
+export type RepositoryValidationRunStatus = "Queued" | "Pending" | "Running" | "Passed" | "Failed" | "Cancelled" | "Completed" | "Error";
 export type RepositoryValidationMode = "quick" | "impact" | "full";
 export type RepositoryUpdatePullRequestStatus = "Created" | "Failed";
 export type RepositoryValidationReleaseRecommendation = "Safe to Merge" | "Merge with Caution" | "Do Not Merge";
@@ -446,8 +447,38 @@ export type ValidationFailureCategory =
   | "Environment Issue"
   | "Dependency Issue"
   | "Unknown";
-export type ValidationAutoFixStatus = "Pending" | "Approved" | "Rejected" | "Edited";
+export type ValidationFailureType =
+  | "Locator Changed"
+  | "Assertion Failed"
+  | "Timeout"
+  | "Navigation Error"
+  | "Invalid Base URL"
+  | "Authentication Failure"
+  | "Authorization Failure"
+  | "API Failure"
+  | "Network Error"
+  | "Test Data Issue"
+  | "Environment Issue"
+  | "Browser Compatibility Issue"
+  | "Flaky Test"
+  | "Dependency / Setup Issue"
+  | "Unknown";
+export type ValidationAutoFixStatus = "Pending" | "Approved" | "Rejected" | "Edited" | "Committed";
 export type ReleaseReadinessRecommendation = "Ready for Release" | "Proceed with Caution" | "Not Recommended for Release";
+export type ReleaseReadinessStatus = "READY" | "READY WITH CAUTION" | "NOT READY" | "BLOCKED";
+export type ReleaseRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type RootCauseCategory =
+  | "UI Selector Change"
+  | "Business Logic Change"
+  | "API Contract Change"
+  | "Authentication Change"
+  | "Authorization Change"
+  | "Routing Change"
+  | "Test Data Change"
+  | "Environment Issue"
+  | "Dependency Issue"
+  | "Timing / Flaky Behavior"
+  | "Unknown";
 
 export interface RepositoryImpactAnalysisTest {
   testFilePath: string;
@@ -734,26 +765,64 @@ export interface ValidationFailureAnalysis {
   id: string;
   workspaceId: string;
   projectId?: string;
+  repositoryId?: string;
   validationRunId: string;
+  workflowRunId?: number;
+  workflowUrl?: string;
+  failureType?: ValidationFailureType;
   rootCause: string;
   category: ValidationFailureCategory;
   affectedModule: string;
   affectedTestFile: string;
+  affectedFiles?: string[];
+  failedTests?: Array<{
+    testFile: string;
+    testName: string;
+    errorMessage: string;
+    suggestedFix: string;
+    duration?: number;
+    retryCount?: number;
+    stackTrace?: string;
+    screenshotUrl?: string;
+    videoUrl?: string;
+    traceUrl?: string;
+  }>;
   confidenceScore: number;
+  summary?: string;
   recommendedFix: string;
+  recommendedActions?: string[];
   autoFixAvailable: boolean;
+  qaOwnerAction?: string;
   riskLevel: RepositoryRiskLevel;
   aiProvider: string;
   aiModel: string;
+  status?: RepositoryValidationRecommendationStatus;
+  errorMessage?: string;
+  createdBy?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ValidationAutoFix {
   id: string;
   workspaceId: string;
   projectId?: string;
+  repositoryId?: string;
   validationRunId: string;
   failureAnalysisId: string;
+  filePath?: string;
+  fixType?: string;
+  repositoryMatchScore?: number;
+  beforeCode?: string;
+  afterCode?: string;
+  explanation?: string;
+  approved?: boolean;
+  rejected?: boolean;
+  committed?: boolean;
+  commitSha?: string;
+  branch?: string;
+  aiProvider?: string;
+  aiModel?: string;
   testFilePath: string;
   oldCode: string;
   fixedCode: string;
@@ -769,25 +838,153 @@ export interface ValidationRetryAttempt {
   id: string;
   workspaceId: string;
   projectId?: string;
+  repositoryId?: string;
   validationRunId: string;
+  parentValidationRunId?: string;
   retryValidationRunId?: string;
   attemptNumber: number;
+  triggeredBy?: string;
+  triggerReason?: string;
+  retryType?: "failed_tests_only" | "after_auto_fix" | "manual";
+  validationMode?: RepositoryValidationMode;
+  browser?: string;
+  testFiles?: string[];
+  testNames?: string[];
+  traceEnabled?: boolean;
   status: RepositoryValidationRunStatus;
+  totalTests?: number;
   passed: number;
   failed: number;
   skipped: number;
   duration: number;
+  failureCategory?: ValidationFailureType;
+  retryRecommendation?: "Recommended" | "With Caution" | "Not Recommended";
+  flakyDetected?: boolean;
   workflowRunId?: number;
   workflowUrl?: string;
   createdBy?: string;
   createdAt: string;
+  completedAt?: string;
+}
+
+export interface ValidationHistoryTimelineStep {
+  name: string;
+  status: string;
+  timestamp: string;
+  duration: number;
+  details: string;
+}
+
+export interface ValidationHistoryRecord {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId?: string;
+  validationRunId: string;
+  workflowRunId?: number;
+  workflowUrl?: string;
+  repositoryName: string;
+  projectName: string;
+  branch: string;
+  sourceBranch: string;
+  targetBranch: string;
+  commitSha?: string;
+  commitMessage?: string;
+  commitAuthor?: string;
+  triggerSource: string;
+  validationMode?: RepositoryValidationMode;
+  browser?: string;
+  browserVersion?: string;
+  playwrightVersion?: string;
+  nodeVersion?: string;
+  operatingSystem?: string;
+  queueTime: number;
+  setupTime: number;
+  executionTime: number;
+  artifactUploadTime: number;
+  aiAnalysisTime: number;
+  totalDuration: number;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  skippedTests: number;
+  retryCount: number;
+  retryStatus: string;
+  aiRecommendation?: RepositoryValidationReleaseRecommendation;
+  aiConfidence?: number;
+  reportUrls: {
+    html?: string;
+    json?: string;
+    junit?: string;
+    screenshots?: string[];
+    videos?: string[];
+    traces?: string[];
+  };
+  logUrls: { workflow?: string };
+  status: string;
+  changedFiles?: RepositoryActivityChangedFile[];
+  pullRequestUrl?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ValidationHistoryDetail {
+  history: ValidationHistoryRecord;
+  timeline: ValidationHistoryTimelineStep[];
+  validationRun: RepositoryValidationRun;
+  failureAnalysis: ValidationFailureAnalysis | null;
+  rootCauseAnalysis: RootCauseAnalysis | null;
+  autoFixes: ValidationAutoFix[];
+  retries: ValidationRetryAttempt[];
+  recommendation: RepositoryValidationRecommendation | null;
+  reports: ValidationHistoryRecord["reportUrls"];
+  logs: {
+    workflow?: string;
+    logs?: string;
+    stdout?: string;
+    stderr?: string;
+    debugLogs?: RepositoryValidationRun["validationDebugLogs"];
+  };
+}
+
+export interface ValidationHistoryStatistics {
+  totalValidations: number;
+  passed: number;
+  failed: number;
+  passedAfterRetry: number;
+  averageDuration: number;
+  validationSuccessRate: number;
+  retrySuccessRate: number;
+  mostActiveRepository: string;
+  mostActiveUser: string;
+  browserDistribution: Record<string, number>;
+  validationModeDistribution: Record<string, number>;
+  dailyValidations: Array<{ date: string; total: number; passed: number; failed: number }>;
 }
 
 export interface ReleaseReadinessSnapshot {
   id: string;
   workspaceId: string;
   projectId?: string;
+  repositoryId?: string;
   releaseName?: string;
+  releaseVersion?: string;
+  releaseScore?: number;
+  releaseStatus?: ReleaseReadinessStatus;
+  aiConfidence?: number;
+  riskLevel?: ReleaseRiskLevel;
+  validationSuccessRate?: number;
+  failedTestsCount?: number;
+  flakyTestsCount?: number;
+  repositoryHealthScore?: number;
+  criticalIssuesCount?: number;
+  blockerIssuesCount?: number;
+  finalRecommendation?: string;
+  reasons?: string[];
+  recommendedActions?: string[];
+  rootCauseInsights?: string[];
+  validationRunIds?: string[];
   readinessScore: number;
   recommendation: ReleaseReadinessRecommendation;
   automationPassRate: number;
@@ -798,7 +995,35 @@ export interface ReleaseReadinessSnapshot {
   coverageScore: number;
   manualExecutionPassRate: number;
   riskSummary: Record<string, number>;
+  createdBy?: string;
   createdAt: string;
+  updatedAt?: string;
+}
+
+export interface RootCauseAnalysis {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId?: string;
+  validationRunId: string;
+  failureAnalysisId?: string;
+  rootCause: string;
+  category: RootCauseCategory;
+  confidenceScore: number;
+  riskLevel: RepositoryRiskLevel;
+  affectedApplicationFiles: string[];
+  affectedTestFiles: string[];
+  failureReason: string;
+  evidence: string[];
+  recommendedFix: string;
+  autoFixPossible: boolean;
+  relatedPreviousFailures: string[];
+  aiProvider: string;
+  aiModel: string;
+  status: RepositoryValidationRecommendationStatus;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RepositoryAnalysis {
@@ -1999,12 +2224,42 @@ export const projectApi = {
     apiRequest<{ suggestion: string; validationRun?: RepositoryValidationRun }>(`/api/integrations/github/impact-analysis/${impactAnalysisId}/failure-explanation`, { method: "POST" }),
   generateValidationFailureAnalysis: (validationRunId: string) =>
     apiRequest<ValidationFailureAnalysis>(`/api/validation/${validationRunId}/failure-analysis`, { method: "POST" }),
+  regenerateValidationFailureAnalysis: (validationRunId: string) =>
+    apiRequest<ValidationFailureAnalysis>(`/api/validation/${validationRunId}/failure-analysis/regenerate`, { method: "POST" }),
   getValidationFailureAnalysis: (validationRunId: string) =>
     apiRequest<ValidationFailureAnalysis>(`/api/validation/${validationRunId}/failure-analysis`),
+  listValidationFailedTests: (validationRunId: string) =>
+    apiRequest<NonNullable<RepositoryValidationRun["failedTests"]>>(`/api/validation/${validationRunId}/failed-tests`),
+  generateRootCauseAnalysis: (validationRunId: string) =>
+    apiRequest<RootCauseAnalysis>(`/api/validation/${validationRunId}/root-cause-analysis`, { method: "POST" }),
+  getRootCauseAnalysis: (validationRunId: string) =>
+    apiRequest<RootCauseAnalysis>(`/api/validation/${validationRunId}/root-cause-analysis`),
+  regenerateRootCauseAnalysis: (validationRunId: string) =>
+    apiRequest<RootCauseAnalysis>(`/api/validation/${validationRunId}/root-cause-analysis/regenerate`, { method: "POST" }),
+  getRootCauseEvidence: (validationRunId: string) =>
+    apiRequest<{
+      validationRunId: string;
+      changedFiles: RepositoryActivityChangedFile[];
+      failedTests: NonNullable<RepositoryValidationRun["failedTests"]>;
+      logs?: string;
+      stderr?: string;
+      stackTrace?: string;
+      failureAnalysis: ValidationFailureAnalysis | null;
+      rootCause: RootCauseAnalysis | null;
+      generatedUpdates: Array<{ testFilePath: string; updateSummary: string; impactReason: string }>;
+    }>(`/api/validation/${validationRunId}/root-cause-evidence`),
   generateValidationAutoFix: (validationRunId: string) =>
-    apiRequest<ValidationAutoFix>(`/api/validation/${validationRunId}/auto-fix`, { method: "POST" }),
+    apiRequest<ValidationAutoFix[]>(`/api/validation/${validationRunId}/auto-fix`, { method: "POST" }),
+  regenerateValidationAutoFix: (validationRunId: string) =>
+    apiRequest<ValidationAutoFix[]>(`/api/validation/${validationRunId}/auto-fix/regenerate`, { method: "POST" }),
   listValidationAutoFixes: (validationRunId: string) =>
     apiRequest<ValidationAutoFix[]>(`/api/validation/${validationRunId}/auto-fix`),
+  approveAllValidationAutoFixes: (validationRunId: string) =>
+    apiRequest<ValidationAutoFix[]>(`/api/validation/${validationRunId}/auto-fix/approve`, { method: "POST" }),
+  rejectAllValidationAutoFixes: (validationRunId: string) =>
+    apiRequest<ValidationAutoFix[]>(`/api/validation/${validationRunId}/auto-fix/reject`, { method: "POST" }),
+  commitValidationAutoFixes: (validationRunId: string) =>
+    apiRequest<{ branch: string; committed: ValidationAutoFix[] }>(`/api/validation/${validationRunId}/auto-fix/commit`, { method: "POST" }),
   approveValidationAutoFix: (fixId: string) =>
     apiRequest<ValidationAutoFix>(`/api/validation/auto-fix/${fixId}/approve`, { method: "PATCH" }),
   rejectValidationAutoFix: (fixId: string) =>
@@ -2013,8 +2268,32 @@ export const projectApi = {
     apiRequest<ValidationAutoFix>(`/api/validation/auto-fix/${fixId}/edit`, { method: "PATCH", body: JSON.stringify(input) }),
   retryValidationRun: (validationRunId: string) =>
     apiRequest<{ retry: ValidationRetryAttempt; validationRun: RepositoryValidationRun }>(`/api/validation/${validationRunId}/retry`, { method: "POST" }),
+  retryValidationAfterFix: (validationRunId: string) =>
+    apiRequest<{ retry: ValidationRetryAttempt; validationRun: RepositoryValidationRun }>(`/api/validation/${validationRunId}/retry-after-fix`, { method: "POST" }),
   listValidationRetries: (validationRunId: string) =>
     apiRequest<ValidationRetryAttempt[]>(`/api/validation/${validationRunId}/retries`),
+  getValidationRetryRecommendation: (validationRunId: string) =>
+    apiRequest<{
+      retryRecommendation: "Recommended" | "With Caution" | "Not Recommended";
+      reason: string;
+      failureType: ValidationFailureType | "Unknown";
+      testFiles: string[];
+      testNames: string[];
+      maxRetries: number;
+    }>(`/api/validation/${validationRunId}/retry-recommendation`),
+  getValidationRetryStatistics: (workspaceId: string) =>
+    apiRequest<{
+      totalRetries: number;
+      retrySuccessRate: number;
+      flakyFailureCount: number;
+      consistentFailureCount: number;
+      averageRetryDuration: number;
+      passedRetries: number;
+      failedRetries: number;
+      mostRetriedTests: Array<{ testFile: string; count: number }>;
+      testsPassingAfterRetry: string[];
+      testsFailingAfterRetry: string[];
+    }>(`/api/validation/retry-statistics?workspaceId=${encodeURIComponent(workspaceId)}`),
   listValidationHistory: (filters: { workspaceId?: string; projectId?: string; status?: string } = {}) =>
     apiRequest<RepositoryValidationRun[]>(`/api/validation/history${executionQueryString(filters)}`),
   getValidationHistoryDetail: (validationRunId: string) =>
@@ -2025,10 +2304,49 @@ export const projectApi = {
       retries: ValidationRetryAttempt[];
       recommendation: RepositoryValidationRecommendation | null;
     }>(`/api/validation/history/${validationRunId}`),
+  listValidationHistoryRecords: (filters: {
+    workspaceId?: string;
+    projectId?: string;
+    repository?: string;
+    branch?: string;
+    commit?: string;
+    status?: string;
+    validationMode?: string;
+    browser?: string;
+    triggerSource?: string;
+    user?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    aiRecommendation?: string;
+    retryStatus?: string;
+    search?: string;
+  } = {}) =>
+    apiRequest<ValidationHistoryRecord[]>(`/api/validation-history${executionQueryString(filters)}`),
+  getValidationHistoryRecordDetail: (validationRunId: string) =>
+    apiRequest<ValidationHistoryDetail>(`/api/validation-history/${validationRunId}`),
+  getValidationHistoryTimeline: (validationRunId: string) =>
+    apiRequest<ValidationHistoryTimelineStep[]>(`/api/validation-history/timeline/${validationRunId}`),
+  getValidationHistoryReports: (validationRunId: string) =>
+    apiRequest<ValidationHistoryRecord["reportUrls"]>(`/api/validation-history/reports/${validationRunId}`),
+  getValidationHistoryLogs: (validationRunId: string) =>
+    apiRequest<ValidationHistoryDetail["logs"]>(`/api/validation-history/logs/${validationRunId}`),
+  getValidationHistoryRetries: (validationRunId: string) =>
+    apiRequest<ValidationRetryAttempt[]>(`/api/validation-history/retry/${validationRunId}`),
+  getValidationHistoryStatistics: (filters: { workspaceId?: string; projectId?: string; repository?: string; branch?: string; status?: string } = {}) =>
+    apiRequest<ValidationHistoryStatistics>(`/api/validation-history/statistics${executionQueryString(filters)}`),
   getReleaseReadinessSummary: (workspaceId?: string) =>
     apiRequest<ReleaseReadinessSnapshot>(`/api/release-readiness/summary${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
   getProjectReleaseReadiness: (projectId: string) =>
     apiRequest<ReleaseReadinessSnapshot>(`/api/release-readiness/project/${projectId}`),
+  getRepositoryReleaseReadiness: (repositoryId: string) =>
+    apiRequest<ReleaseReadinessSnapshot>(`/api/release-readiness/repository/${repositoryId}`),
+  getReleaseReadinessTimeline: (projectId: string) =>
+    apiRequest<ValidationHistoryTimelineStep[]>(`/api/release-readiness/timeline/${projectId}`),
+  recalculateReleaseReadiness: (input: { workspaceId?: string; projectId?: string; repositoryId?: string }) =>
+    apiRequest<ReleaseReadinessSnapshot>("/api/release-readiness/recalculate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   createRepositoryImpactPullRequest: (impactAnalysisId: string, force = false) =>
     apiRequest<RepositoryUpdatePullRequest & { pullRequest?: { html_url: string; number: number; branchName: string; updatedFiles: string[] } }>(
       `/api/integrations/github/impact-analysis/${impactAnalysisId}/create-pr`,
