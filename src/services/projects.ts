@@ -491,6 +491,17 @@ export type ApiTestGenerationSourceType = "endpoint" | "collection" | "postman-r
 export type ApiTestGenerationType = "all" | "positive" | "negative" | "edge" | "contract" | "security" | "performance";
 export type ApiTestFramework = "playwright" | "axios" | "supertest";
 export type GeneratedApiTestStatus = "Pending" | "Approved" | "Rejected" | "Edited";
+export type ApiRunType = "endpoint" | "request" | "collection" | "generated_suite";
+export type ApiRunResultStatus = "Passed" | "Failed" | "Error";
+export type ApiAssertionType =
+  | "status_code_equals"
+  | "response_time_less_than"
+  | "header_exists"
+  | "json_field_exists"
+  | "json_field_equals"
+  | "body_contains"
+  | "body_not_contains"
+  | "schema_validation";
 
 export interface RepositoryImpactAnalysisTest {
   testFilePath: string;
@@ -1240,6 +1251,65 @@ export interface GeneratedApiTest {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiAssertionInput {
+  assertionType: ApiAssertionType;
+  fieldPath?: string;
+  expectedValue?: unknown;
+  enabled?: boolean;
+}
+
+export interface ApiAssertionResult {
+  assertionType: ApiAssertionType;
+  label: string;
+  passed: boolean;
+  expectedValue?: unknown;
+  actualValue?: unknown;
+  message: string;
+}
+
+export interface ApiRun {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  apiWorkspaceId?: string;
+  endpointId?: string;
+  runType: ApiRunType;
+  environment?: string;
+  resolvedUrl: string;
+  method: string;
+  requestHeaders: Record<string, string>;
+  requestBody?: unknown;
+  queryParams: unknown;
+  pathParams: unknown;
+  authType: ApiAuthType;
+  statusCode?: number;
+  statusText?: string;
+  responseTime: number;
+  responseSize: number;
+  responseHeaders: Record<string, string>;
+  responseBody?: unknown;
+  assertionResults: ApiAssertionResult[];
+  contractResult?: {
+    passed: boolean;
+    issues: string[];
+  };
+  aiAnalysis?: string;
+  resultStatus: ApiRunResultStatus;
+  errorMessage?: string;
+  executedBy?: string;
+  executedAt: string;
+}
+
+export interface ApiCollectionRunResponse {
+  runs: ApiRun[];
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    errors: number;
+  };
 }
 
 export interface ApiTestGenerationResponse {
@@ -2238,6 +2308,73 @@ export const projectApi = {
     apiRequest<{ test: GeneratedApiTest; suite: GeneratedApiTestSuite | null }>(`/api/api-test-generation/tests/${testId}/reject`, { method: "POST" }),
   regenerateGeneratedApiTest: (testId: string) =>
     apiRequest<{ test: GeneratedApiTest; suite: GeneratedApiTestSuite | null }>(`/api/api-test-generation/tests/${testId}/regenerate`, { method: "POST" }),
+  runApiEndpoint: (endpointId: string, input: {
+    workspaceId?: string;
+    projectId?: string;
+    apiWorkspaceId?: string;
+    environment?: string;
+    variables?: Record<string, string>;
+    headers?: Record<string, string>;
+    queryParams?: Record<string, string>;
+    pathParams?: Record<string, string>;
+    requestBody?: unknown;
+    authType?: string;
+    timeoutMs?: number;
+    retryCount?: number;
+    assertions?: ApiAssertionInput[];
+  }) => apiRequest<ApiRun>(`/api/api-runner/run-endpoint/${endpointId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  runApiRequest: (input: {
+    workspaceId?: string;
+    projectId?: string;
+    apiWorkspaceId?: string;
+    environment?: string;
+    variables?: Record<string, string>;
+    url: string;
+    method: string;
+    headers?: Record<string, string>;
+    queryParams?: Record<string, string>;
+    pathParams?: Record<string, string>;
+    requestBody?: unknown;
+    authType?: string;
+    timeoutMs?: number;
+    retryCount?: number;
+    assertions?: ApiAssertionInput[];
+  }) => apiRequest<ApiRun>("/api/api-runner/run-request", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  runApiCollection: (apiWorkspaceId: string, input: {
+    workspaceId?: string;
+    projectId?: string;
+    environment?: string;
+    variables?: Record<string, string>;
+    headers?: Record<string, string>;
+    queryParams?: Record<string, string>;
+    pathParams?: Record<string, string>;
+    requestBody?: unknown;
+    authType?: string;
+    timeoutMs?: number;
+    retryCount?: number;
+    assertions?: ApiAssertionInput[];
+    stopOnFailure?: boolean;
+  }) => apiRequest<ApiCollectionRunResponse>(`/api/api-runner/run-collection/${apiWorkspaceId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  listApiRuns: (filters: { workspaceId?: string; apiWorkspaceId?: string; endpointId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.workspaceId) params.set("workspaceId", filters.workspaceId);
+    if (filters.apiWorkspaceId) params.set("apiWorkspaceId", filters.apiWorkspaceId);
+    if (filters.endpointId) params.set("endpointId", filters.endpointId);
+    const query = params.toString();
+    return apiRequest<ApiRun[]>(`/api/api-runner/runs${query ? `?${query}` : ""}`);
+  },
+  getApiRun: (runId: string) => apiRequest<ApiRun>(`/api/api-runner/runs/${runId}`),
+  getApiRunLogs: (runId: string) => apiRequest<unknown>(`/api/api-runner/runs/${runId}/logs`),
+  deleteApiRun: (runId: string) => apiRequest<void>(`/api/api-runner/runs/${runId}`, { method: "DELETE" }),
   listProjects: () => apiRequest<ProjectSummary[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     apiRequest<ProjectSummary>("/api/projects", {

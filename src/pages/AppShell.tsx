@@ -134,6 +134,7 @@ import {
   type AIProviderSettingsResponse,
   type AIProviderUsageLog,
   type ApiEndpoint,
+  type ApiRun,
   type ApiRiskLevel,
   type ApiTestFramework,
   type ApiTestGenerationType,
@@ -3966,9 +3967,13 @@ function ApiWorkspacePage({
   const [generatedSuite, setGeneratedSuite] = useState<GeneratedApiTestSuite | null>(null);
   const [generatedTests, setGeneratedTests] = useState<GeneratedApiTest[]>([]);
   const [selectedGeneratedTest, setSelectedGeneratedTest] = useState<GeneratedApiTest | null>(null);
+  const [apiRuns, setApiRuns] = useState<ApiRun[]>([]);
+  const [selectedApiRun, setSelectedApiRun] = useState<ApiRun | null>(null);
+  const [latestCollectionSummary, setLatestCollectionSummary] = useState<{ total: number; passed: number; failed: number; errors: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isGeneratingApiTests, setIsGeneratingApiTests] = useState(false);
+  const [isRunningApi, setIsRunningApi] = useState(false);
   const [projectId, setProjectId] = useState("none");
   const [apiGenerationType, setApiGenerationType] = useState<ApiTestGenerationType>("all");
   const [apiFramework, setApiFramework] = useState<ApiTestFramework>("playwright");
@@ -3976,6 +3981,15 @@ function ApiWorkspacePage({
   const [manualApiMethod, setManualApiMethod] = useState("GET");
   const [manualApiEndpoint, setManualApiEndpoint] = useState("");
   const [apiRequirementText, setApiRequirementText] = useState("");
+  const [runnerEnvironment, setRunnerEnvironment] = useState("QA");
+  const [runnerBaseUrl, setRunnerBaseUrl] = useState("");
+  const [runnerToken, setRunnerToken] = useState("");
+  const [runnerApiKey, setRunnerApiKey] = useState("");
+  const [runnerHeaders, setRunnerHeaders] = useState("{}");
+  const [runnerBody, setRunnerBody] = useState("{}");
+  const [runnerTimeout, setRunnerTimeout] = useState("15000");
+  const [runnerStatusAssertion, setRunnerStatusAssertion] = useState("200");
+  const [runnerResponseTimeAssertion, setRunnerResponseTimeAssertion] = useState("2000");
   const [swaggerUrl, setSwaggerUrl] = useState("");
   const [apiUrl, setApiUrl] = useState("");
   const [githubForm, setGithubForm] = useState({ owner: "", repo: "", path: "", branch: "main" });
@@ -4008,6 +4022,7 @@ function ApiWorkspacePage({
       ]);
       setEndpoints(nextEndpoints);
       setPostmanRequests(nextPostmanRequests);
+      setApiRuns(await projectApi.listApiRuns({ workspaceId }));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load API workspaces.");
     } finally {
@@ -4192,6 +4207,98 @@ function ApiWorkspacePage({
     }
   };
 
+  const parseJsonObject = (value: string, label: string) => {
+    try {
+      const parsed = JSON.parse(value || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      return parsed as Record<string, string>;
+    } catch {
+      throw new Error(`${label} must be a valid JSON object.`);
+    }
+  };
+
+  const runnerInput = () => {
+    const headers = parseJsonObject(runnerHeaders, "Headers");
+    const body = JSON.parse(runnerBody || "{}") as unknown;
+    return {
+      workspaceId,
+      projectId: projectId === "none" ? undefined : projectId,
+      apiWorkspaceId: selectedWorkspace?.id,
+      environment: runnerEnvironment,
+      variables: {
+        BASE_URL: runnerBaseUrl || selectedWorkspace?.serverUrls?.[0] || "",
+        API_TOKEN: runnerToken,
+        TOKEN: runnerToken,
+        API_KEY: runnerApiKey,
+      },
+      headers,
+      requestBody: body,
+      timeoutMs: Number(runnerTimeout) || 15000,
+      assertions: [
+        { assertionType: "status_code_equals" as const, expectedValue: Number(runnerStatusAssertion) || 200, enabled: true },
+        { assertionType: "response_time_less_than" as const, expectedValue: Number(runnerResponseTimeAssertion) || 2000, enabled: true },
+        { assertionType: "schema_validation" as const, enabled: true },
+      ],
+    };
+  };
+
+  const refreshApiRuns = async () => {
+    setApiRuns(await projectApi.listApiRuns({ workspaceId, apiWorkspaceId: selectedWorkspace?.id }));
+  };
+
+  const runEndpoint = async (endpoint: ApiEndpoint) => {
+    if (["DELETE", "PUT", "PATCH"].includes(endpoint.method) && !window.confirm(`${endpoint.method} can change data. Run this API request?`)) return;
+    setIsRunningApi(true);
+    try {
+      const run = await projectApi.runApiEndpoint(endpoint.id, {
+        ...runnerInput(),
+        apiWorkspaceId: endpoint.apiWorkspaceId,
+        authType: endpoint.authType,
+      });
+      setSelectedApiRun(run);
+      await refreshApiRuns();
+      toast.success(`API run ${run.resultStatus.toLowerCase()}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "API run failed.");
+    } finally {
+      setIsRunningApi(false);
+    }
+  };
+
+  const runManualRequest = async () => {
+    setIsRunningApi(true);
+    try {
+      const run = await projectApi.runApiRequest({
+        ...runnerInput(),
+        url: manualApiEndpoint || `${runnerBaseUrl}/api/resource`,
+        method: manualApiMethod,
+      });
+      setSelectedApiRun(run);
+      await refreshApiRuns();
+      toast.success(`API run ${run.resultStatus.toLowerCase()}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "API request failed.");
+    } finally {
+      setIsRunningApi(false);
+    }
+  };
+
+  const runCollection = async () => {
+    if (!selectedWorkspace) return;
+    setIsRunningApi(true);
+    try {
+      const result = await projectApi.runApiCollection(selectedWorkspace.id, runnerInput());
+      setLatestCollectionSummary(result.summary);
+      setSelectedApiRun(result.runs[0] ?? null);
+      await refreshApiRuns();
+      toast.success(`Collection run completed: ${result.summary.passed}/${result.summary.total} passed`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Collection run failed.");
+    } finally {
+      setIsRunningApi(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 rounded-[2rem] border bg-card/90 p-6 shadow-sm lg:flex-row lg:items-end lg:justify-between">
@@ -4365,6 +4472,157 @@ function ApiWorkspacePage({
           </div>
         </Card>
       </div>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">API Runner</Badge>
+            <h2 className="font-display text-xl font-semibold">Execute APIs From Workspace</h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              Run endpoints, manual requests, or full collections with environment variables, auth, assertions, response viewing, and saved run history.
+            </p>
+          </div>
+          {latestCollectionSummary && (
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">{latestCollectionSummary.total} run</Badge>
+              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">{latestCollectionSummary.passed} passed</Badge>
+              <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">{latestCollectionSummary.failed + latestCollectionSummary.errors} failed</Badge>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Environment</label>
+                <Select value={runnerEnvironment} onValueChange={setRunnerEnvironment}>
+                  <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Local", "Development", "QA", "UAT", "Staging", "Production"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Timeout</label>
+                <Input className="mt-2" value={runnerTimeout} onChange={(event) => setRunnerTimeout(event.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Expected Status</label>
+                <Input className="mt-2" value={runnerStatusAssertion} onChange={(event) => setRunnerStatusAssertion(event.target.value)} />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">BASE_URL</label>
+              <Input className="mt-2" value={runnerBaseUrl} onChange={(event) => setRunnerBaseUrl(event.target.value)} placeholder={selectedWorkspace?.serverUrls?.[0] || "https://api.example.com"} />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Input type="password" value={runnerToken} onChange={(event) => setRunnerToken(event.target.value)} placeholder="API_TOKEN / Bearer token" />
+              <Input type="password" value={runnerApiKey} onChange={(event) => setRunnerApiKey(event.target.value)} placeholder="API_KEY" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-[120px_1fr]">
+              <Select value={manualApiMethod} onValueChange={setManualApiMethod}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"].map((method) => <SelectItem key={method} value={method}>{method}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input value={manualApiEndpoint} onChange={(event) => setManualApiEndpoint(event.target.value)} placeholder="{{BASE_URL}}/api/users/{{userId}}" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Headers JSON</label>
+                <Textarea className="mt-2 font-mono text-xs" value={runnerHeaders} onChange={(event) => setRunnerHeaders(event.target.value)} rows={4} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Body JSON</label>
+                <Textarea className="mt-2 font-mono text-xs" value={runnerBody} onChange={(event) => setRunnerBody(event.target.value)} rows={4} />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void runManualRequest()} disabled={isRunningApi}>
+                {isRunningApi ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+                Run Request
+              </Button>
+              <Button variant="outline" onClick={() => void runCollection()} disabled={isRunningApi || !selectedWorkspace}>
+                <ListChecks className="size-4" />
+                Run Collection
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">Response Viewer</p>
+                  <p className="text-sm text-muted-foreground">Status, timing, headers, body, assertions, and contract result.</p>
+                </div>
+                {selectedApiRun && <Badge variant="outline" className={selectedApiRun.resultStatus === "Passed" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : selectedApiRun.resultStatus === "Failed" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{selectedApiRun.resultStatus}</Badge>}
+              </div>
+              {selectedApiRun ? (
+                <div className="mt-4 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <MiniStat label="Status" value={selectedApiRun.statusCode ?? "Error"} />
+                    <MiniStat label="Time" value={`${selectedApiRun.responseTime} ms`} />
+                    <MiniStat label="Size" value={`${selectedApiRun.responseSize} B`} />
+                    <MiniStat label="Assertions" value={`${selectedApiRun.assertionResults.filter((item) => item.passed).length}/${selectedApiRun.assertionResults.length}`} />
+                  </div>
+                  <Tabs defaultValue="body">
+                    <TabsList className="grid w-full grid-cols-4">
+                      <TabsTrigger value="body">Body</TabsTrigger>
+                      <TabsTrigger value="headers">Headers</TabsTrigger>
+                      <TabsTrigger value="assertions">Assertions</TabsTrigger>
+                      <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="body" className="mt-3"><SchemaPreview value={selectedApiRun.responseBody ?? selectedApiRun.errorMessage} /></TabsContent>
+                    <TabsContent value="headers" className="mt-3"><SchemaPreview value={selectedApiRun.responseHeaders} /></TabsContent>
+                    <TabsContent value="assertions" className="mt-3">
+                      <div className="space-y-2">
+                        {selectedApiRun.assertionResults.map((assertion) => (
+                          <div key={`${assertion.assertionType}-${assertion.label}`} className="flex items-center justify-between rounded-xl border bg-muted/30 p-3 text-sm">
+                            <span>{assertion.label}</span>
+                            <Badge variant="outline" className={assertion.passed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}>{assertion.passed ? "Passed" : "Failed"}</Badge>
+                          </div>
+                        ))}
+                        {selectedApiRun.contractResult && !selectedApiRun.contractResult.passed && <SchemaPreview value={selectedApiRun.contractResult.issues} />}
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="timeline" className="mt-3">
+                      <div className="rounded-xl border bg-muted/30 p-3 text-sm">
+                        <p>Executed at {formatDate(selectedApiRun.executedAt)}</p>
+                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{selectedApiRun.method} {selectedApiRun.resolvedUrl}</p>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">Run an API request to view the response.</div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold">Run History</p>
+                <Button variant="outline" size="sm" onClick={() => void refreshApiRuns()}>Refresh</Button>
+              </div>
+              <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+                {apiRuns.slice(0, 8).map((run) => (
+                  <button key={run.id} type="button" onClick={() => setSelectedApiRun(run)} className="w-full rounded-xl border bg-background p-3 text-left hover:border-primary/40">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate font-mono text-xs">{run.method} {run.resolvedUrl}</p>
+                      <Badge variant="outline" className={run.resultStatus === "Passed" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}>{run.resultStatus}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{run.statusCode || "Error"} · {run.responseTime} ms · {formatDate(run.executedAt)}</p>
+                  </button>
+                ))}
+                {!apiRuns.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No API runs yet.</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
 
       <Card className="p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -4723,7 +4981,7 @@ function ApiWorkspacePage({
                             Details
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => void generateApiTests("endpoint", endpoint)} disabled={isGeneratingApiTests}>Generate Tests</Button>
-                          <Button variant="ghost" size="sm" disabled>Run API</Button>
+                          <Button variant="ghost" size="sm" onClick={() => void runEndpoint(endpoint)} disabled={isRunningApi}>Run API</Button>
                         </div>
                       </td>
                     </tr>
