@@ -56,6 +56,7 @@ import {
   Keyboard,
   Network,
   KeyRound,
+  PlayCircle,
 } from "lucide-react";
 import {
   Area,
@@ -135,6 +136,8 @@ import {
   type AIProviderUsageLog,
   type ApiEndpoint,
   type ApiRun,
+  type ApiContractValidation,
+  type ContractDashboard,
   type ApiRiskLevel,
   type ApiTestFramework,
   type ApiTestGenerationType,
@@ -3969,11 +3972,15 @@ function ApiWorkspacePage({
   const [selectedGeneratedTest, setSelectedGeneratedTest] = useState<GeneratedApiTest | null>(null);
   const [apiRuns, setApiRuns] = useState<ApiRun[]>([]);
   const [selectedApiRun, setSelectedApiRun] = useState<ApiRun | null>(null);
+  const [contractDashboard, setContractDashboard] = useState<ContractDashboard | null>(null);
+  const [contractValidations, setContractValidations] = useState<ApiContractValidation[]>([]);
+  const [selectedContractValidation, setSelectedContractValidation] = useState<ApiContractValidation | null>(null);
   const [latestCollectionSummary, setLatestCollectionSummary] = useState<{ total: number; passed: number; failed: number; errors: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isGeneratingApiTests, setIsGeneratingApiTests] = useState(false);
   const [isRunningApi, setIsRunningApi] = useState(false);
+  const [isValidatingContract, setIsValidatingContract] = useState(false);
   const [projectId, setProjectId] = useState("none");
   const [apiGenerationType, setApiGenerationType] = useState<ApiTestGenerationType>("all");
   const [apiFramework, setApiFramework] = useState<ApiTestFramework>("playwright");
@@ -4023,6 +4030,7 @@ function ApiWorkspacePage({
       setEndpoints(nextEndpoints);
       setPostmanRequests(nextPostmanRequests);
       setApiRuns(await projectApi.listApiRuns({ workspaceId }));
+      setContractDashboard(await projectApi.getApiContractDashboard(workspaceId));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load API workspaces.");
     } finally {
@@ -4296,6 +4304,44 @@ function ApiWorkspacePage({
       toast.error(error instanceof Error ? error.message : "Collection run failed.");
     } finally {
       setIsRunningApi(false);
+    }
+  };
+
+  const refreshContractData = async (endpointId?: string) => {
+    const [dashboard, history] = await Promise.all([
+      projectApi.getApiContractDashboard(workspaceId),
+      endpointId ? projectApi.getApiContractHistory(endpointId) : Promise.resolve(contractValidations),
+    ]);
+    setContractDashboard(dashboard);
+    if (endpointId) setContractValidations(history);
+  };
+
+  const validateContract = async (endpoint: ApiEndpoint, run?: ApiRun | null) => {
+    setIsValidatingContract(true);
+    try {
+      const validation = await projectApi.validateApiContractEndpoint(endpoint.id, run ? { runId: run.id } : {});
+      setSelectedContractValidation(validation);
+      setContractValidations(await projectApi.getApiContractHistory(endpoint.id));
+      setContractDashboard(await projectApi.getApiContractDashboard(workspaceId));
+      toast.success(`Contract ${validation.validationStatus.toLowerCase()} with ${validation.compatibilityScore}% compatibility`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Contract validation failed.");
+    } finally {
+      setIsValidatingContract(false);
+    }
+  };
+
+  const validateWorkspaceContracts = async () => {
+    if (!selectedWorkspace) return;
+    setIsValidatingContract(true);
+    try {
+      const result = await projectApi.validateApiContractWorkspace(selectedWorkspace.id);
+      setContractDashboard(await projectApi.getApiContractDashboard(workspaceId));
+      toast.success(`Validated ${result.summary.total} API contracts`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Workspace contract validation failed.");
+    } finally {
+      setIsValidatingContract(false);
     }
   };
 
@@ -4607,6 +4653,20 @@ function ApiWorkspacePage({
                 <p className="font-semibold">Run History</p>
                 <Button variant="outline" size="sm" onClick={() => void refreshApiRuns()}>Refresh</Button>
               </div>
+              {selectedApiRun?.endpointId && (
+                <Button
+                  className="mt-3 w-full"
+                  variant="outline"
+                  onClick={() => {
+                    const endpoint = endpoints.find((item) => item.id === selectedApiRun.endpointId);
+                    if (endpoint) void validateContract(endpoint, selectedApiRun);
+                  }}
+                  disabled={isValidatingContract}
+                >
+                  {isValidatingContract ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                  Validate Contract for This Run
+                </Button>
+              )}
               <div className="mt-3 max-h-72 space-y-2 overflow-auto">
                 {apiRuns.slice(0, 8).map((run) => (
                   <button key={run.id} type="button" onClick={() => setSelectedApiRun(run)} className="w-full rounded-xl border bg-background p-3 text-left hover:border-primary/40">
@@ -4619,6 +4679,94 @@ function ApiWorkspacePage({
                 ))}
                 {!apiRuns.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No API runs yet.</p>}
               </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">AI Contract Testing</Badge>
+            <h2 className="font-display text-xl font-semibold">API Contract Health</h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              Compare actual API responses with imported Swagger/OpenAPI or Postman contracts, detect breaking changes, and generate business-aware recommendations.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => void validateWorkspaceContracts()} disabled={!selectedWorkspace || isValidatingContract}>
+            {isValidatingContract ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+            Validate Workspace
+          </Button>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <MiniStat label="Compatibility" value={`${contractDashboard?.compatibilityScore ?? 100}%`} />
+          <MiniStat label="Valid Contracts" value={contractDashboard?.validContracts ?? 0} />
+          <MiniStat label="Failed Contracts" value={contractDashboard?.failedContracts ?? 0} />
+          <MiniStat label="Breaking Changes" value={contractDashboard?.breakingChanges ?? 0} />
+          <MiniStat label="High Risk APIs" value={contractDashboard?.highRiskApis ?? 0} />
+          <MiniStat label="Critical APIs" value={contractDashboard?.criticalApis ?? 0} />
+          <MiniStat label="Total APIs" value={contractDashboard?.totalApis ?? 0} />
+          <MiniStat label="Latest Status" value={selectedContractValidation?.validationStatus ?? "No validation"} />
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <div className="rounded-2xl border bg-muted/20 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">Contract Analysis</p>
+                <p className="text-sm text-muted-foreground">AI-style explanation, release risk, and recommended actions.</p>
+              </div>
+              {selectedContractValidation && (
+                <Badge variant="outline" className={selectedContractValidation.validationStatus === "Passed" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : selectedContractValidation.validationStatus === "Failed" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"}>
+                  {selectedContractValidation.validationStatus}
+                </Badge>
+              )}
+            </div>
+            {selectedContractValidation ? (
+              <div className="mt-4 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <MiniStat label="Score" value={`${selectedContractValidation.compatibilityScore}%`} />
+                  <MiniStat label="Risk" value={selectedContractValidation.riskLevel} />
+                  <MiniStat label="AI Confidence" value={`${selectedContractValidation.aiConfidence}%`} />
+                </div>
+                <div className="rounded-xl border bg-background p-3 text-sm">
+                  <p className="font-semibold">AI Analysis</p>
+                  <p className="mt-1 text-muted-foreground">{selectedContractValidation.aiAnalysis}</p>
+                </div>
+                <div className="space-y-2">
+                  {selectedContractValidation.recommendations.map((recommendation) => (
+                    <div key={recommendation} className="rounded-xl border bg-muted/30 p-3 text-sm">{recommendation}</div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                Run an API, then validate its contract from the endpoint row or response viewer.
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-muted/20 p-4">
+            <p className="font-semibold">Difference Viewer</p>
+            <p className="text-sm text-muted-foreground">Added, removed, changed fields, status changes, and impact.</p>
+            <div className="mt-4 max-h-80 space-y-2 overflow-auto">
+              {selectedContractValidation?.breakingChanges.length ? selectedContractValidation.breakingChanges.map((change) => (
+                <div key={`${change.changeType}-${change.fieldPath}`} className="rounded-xl border bg-background p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-mono text-xs font-semibold">{change.fieldPath}</p>
+                    <Badge variant="outline" className={change.severity === "Critical" || change.severity === "High" ? "border-red-200 bg-red-50 text-red-700" : change.severity === "Medium" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-blue-200 bg-blue-50 text-blue-700"}>{change.severity}</Badge>
+                  </div>
+                  <p className="mt-2 text-sm font-semibold">{change.changeType}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{change.impact}</p>
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    <pre className="max-h-28 overflow-auto rounded bg-slate-950 p-2 text-[11px] text-slate-100">{JSON.stringify(change.expectedValue, null, 2)}</pre>
+                    <pre className="max-h-28 overflow-auto rounded bg-slate-950 p-2 text-[11px] text-slate-100">{JSON.stringify(change.actualValue, null, 2)}</pre>
+                  </div>
+                </div>
+              )) : (
+                <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No contract differences selected.</p>
+              )}
             </div>
           </div>
         </div>
@@ -4982,6 +5130,7 @@ function ApiWorkspacePage({
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => void generateApiTests("endpoint", endpoint)} disabled={isGeneratingApiTests}>Generate Tests</Button>
                           <Button variant="ghost" size="sm" onClick={() => void runEndpoint(endpoint)} disabled={isRunningApi}>Run API</Button>
+                          <Button variant="ghost" size="sm" onClick={() => void validateContract(endpoint)} disabled={isValidatingContract}>Contract</Button>
                         </div>
                       </td>
                     </tr>

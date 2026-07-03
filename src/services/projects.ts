@@ -493,6 +493,9 @@ export type ApiTestFramework = "playwright" | "axios" | "supertest";
 export type GeneratedApiTestStatus = "Pending" | "Approved" | "Rejected" | "Edited";
 export type ApiRunType = "endpoint" | "request" | "collection" | "generated_suite";
 export type ApiRunResultStatus = "Passed" | "Failed" | "Error";
+export type ContractValidationStatus = "Passed" | "Failed" | "Warning";
+export type ContractChangeType = "Missing Field" | "Additional Field" | "Type Change" | "Status Code Change" | "Enum Change" | "Structure Change" | "Header Change";
+export type ContractSeverity = "Low" | "Medium" | "High" | "Critical";
 export type ApiAssertionType =
   | "status_code_equals"
   | "response_time_less_than"
@@ -1310,6 +1313,64 @@ export interface ApiCollectionRunResponse {
     failed: number;
     errors: number;
   };
+}
+
+export interface ContractDifference {
+  id: string;
+  validationId: string;
+  fieldPath: string;
+  changeType: ContractChangeType;
+  expectedValue?: unknown;
+  actualValue?: unknown;
+  severity: ContractSeverity;
+  impact: string;
+  recommendation: string;
+}
+
+export interface ApiContractValidation {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  apiWorkspaceId?: string;
+  endpointId?: string;
+  validationRunId?: string;
+  expectedSchema?: unknown;
+  actualSchema?: unknown;
+  expectedStatusCode?: number;
+  actualStatusCode?: number;
+  compatibilityScore: number;
+  breakingChanges: ContractDifference[];
+  addedFields: string[];
+  removedFields: string[];
+  changedFields: string[];
+  riskLevel: ApiRiskLevel | "Critical";
+  aiAnalysis: string;
+  aiConfidence: number;
+  recommendations: string[];
+  validationStatus: ContractValidationStatus;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContractDashboard {
+  totalApis: number;
+  validContracts: number;
+  failedContracts: number;
+  breakingChanges: number;
+  compatibilityScore: number;
+  highRiskApis: number;
+  criticalApis: number;
+  riskDistribution: Record<string, number>;
+  trend: Array<{ date: string; score: number; status: ContractValidationStatus }>;
+}
+
+export interface ContractCompatibility {
+  compatibilityScore: number;
+  total: number;
+  failed: number;
+  warnings: number;
+  highRiskApis: number;
 }
 
 export interface ApiTestGenerationResponse {
@@ -2375,6 +2436,23 @@ export const projectApi = {
   getApiRun: (runId: string) => apiRequest<ApiRun>(`/api/api-runner/runs/${runId}`),
   getApiRunLogs: (runId: string) => apiRequest<unknown>(`/api/api-runner/runs/${runId}/logs`),
   deleteApiRun: (runId: string) => apiRequest<void>(`/api/api-runner/runs/${runId}`, { method: "DELETE" }),
+  validateApiContract: (input: { endpointId: string; runId?: string; actualStatusCode?: number; actualResponse?: unknown }) =>
+    apiRequest<ApiContractValidation>("/api/contract-testing/validate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  validateApiContractEndpoint: (endpointId: string, input: { runId?: string; actualStatusCode?: number; actualResponse?: unknown } = {}) =>
+    apiRequest<ApiContractValidation>(`/api/contract-testing/validate-endpoint/${endpointId}`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  validateApiContractWorkspace: (apiWorkspaceId: string) =>
+    apiRequest<{ validations: ApiContractValidation[]; summary: { total: number; passed: number; failed: number; warnings: number } }>(`/api/contract-testing/validate-workspace/${apiWorkspaceId}`, { method: "POST" }),
+  getApiContractResult: (validationId: string) => apiRequest<ApiContractValidation>(`/api/contract-testing/results/${validationId}`),
+  getApiContractHistory: (endpointId: string) => apiRequest<ApiContractValidation[]>(`/api/contract-testing/history/${endpointId}`),
+  getApiContractCompatibility: (apiWorkspaceId: string) => apiRequest<ContractCompatibility>(`/api/contract-testing/compatibility/${apiWorkspaceId}`),
+  getApiContractDashboard: (workspaceId?: string) =>
+    apiRequest<ContractDashboard>(`/api/contract-testing/dashboard${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
   listProjects: () => apiRequest<ProjectSummary[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     apiRequest<ProjectSummary>("/api/projects", {
