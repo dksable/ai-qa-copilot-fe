@@ -10,6 +10,7 @@ import {
   GitPullRequest,
   History,
   LayoutDashboard,
+  Network,
   PlayCircle,
   Settings,
   ShieldCheck,
@@ -61,6 +62,7 @@ export const NAV_ITEMS: NavigationItem[] = [
   },
   { label: "Validation", value: "repository-validation-history", icon: ShieldCheck, description: "Runs and AI recommendations" },
   { label: "Manual Test Execution", value: "execution", icon: PlayCircle, description: "Manual test runs" },
+  { label: "API Workspace", value: "api-workspace", icon: Network, description: "Swagger and API inventory" },
   { label: "Analytics", value: "analytics", icon: BarChart3, description: "Coverage and productivity" },
   { label: "Team Workspace", value: "workspace", icon: Users, description: "Members and roles" },
   {

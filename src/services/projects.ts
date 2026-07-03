@@ -479,6 +479,18 @@ export type RootCauseCategory =
   | "Dependency Issue"
   | "Timing / Flaky Behavior"
   | "Unknown";
+export type ApiWorkspaceSourceType = "upload" | "swagger_url" | "github" | "api_url" | "postman";
+export type ApiWorkspaceFormat = "openapi3" | "swagger2" | "json" | "yaml";
+export type ApiImportStatus = "Pending" | "Completed" | "Failed";
+export type ApiAuthType = "Bearer token" | "Basic auth" | "API key header" | "API key query param" | "OAuth2" | "Digest" | "No auth";
+export type ApiRiskLevel = "Low" | "Medium" | "High";
+export type PostmanSourceType = "upload" | "github" | "public_url";
+export type PostmanImportStatus = "Pending" | "Completed" | "Failed";
+export type PostmanVariableSource = "collection" | "environment" | "global" | "runtime";
+export type ApiTestGenerationSourceType = "endpoint" | "collection" | "postman-request" | "requirement" | "manual";
+export type ApiTestGenerationType = "all" | "positive" | "negative" | "edge" | "contract" | "security" | "performance";
+export type ApiTestFramework = "playwright" | "axios" | "supertest";
+export type GeneratedApiTestStatus = "Pending" | "Approved" | "Rejected" | "Edited";
 
 export interface RepositoryImpactAnalysisTest {
   testFilePath: string;
@@ -1024,6 +1036,215 @@ export interface RootCauseAnalysis {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiWorkspace {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  name: string;
+  description?: string;
+  version?: string;
+  sourceType: ApiWorkspaceSourceType;
+  sourceUrl?: string;
+  githubRepo?: string;
+  githubPath?: string;
+  format: ApiWorkspaceFormat;
+  serverUrls: string[];
+  authTypes: ApiAuthType[];
+  tags: string[];
+  totalEndpoints: number;
+  importStatus: ApiImportStatus;
+  importError?: string;
+  rawSpec: unknown;
+  normalizedSpec: unknown;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiEndpoint {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  apiWorkspaceId: string;
+  method: string;
+  path: string;
+  operationId?: string;
+  summary?: string;
+  description?: string;
+  tags: string[];
+  parameters: unknown[];
+  headers: unknown[];
+  requestBodySchema?: unknown;
+  responseSchemas: Record<string, unknown>;
+  statusCodes: string[];
+  authRequired: boolean;
+  authType: ApiAuthType;
+  riskLevel: ApiRiskLevel;
+  examples: {
+    request?: unknown;
+    response?: unknown;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiWorkspaceImportResponse {
+  workspace: ApiWorkspace;
+  endpoints: ApiEndpoint[];
+}
+
+export interface PostmanVariable {
+  name: string;
+  value?: string;
+  source: PostmanVariableSource;
+  resolvedValue?: string;
+}
+
+export interface PostmanWorkspace {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  apiWorkspaceId?: string;
+  collectionName: string;
+  collectionVersion?: string;
+  description?: string;
+  sourceType: PostmanSourceType;
+  sourceUrl?: string;
+  githubRepo?: string;
+  githubPath?: string;
+  importStatus: PostmanImportStatus;
+  importError?: string;
+  authTypes: ApiAuthType[];
+  totalFolders: number;
+  totalRequests: number;
+  totalVariables: number;
+  healthScore: number;
+  aiReady: number;
+  folders: Array<{
+    id: string;
+    name: string;
+    parentId?: string;
+    path: string;
+  }>;
+  variables: PostmanVariable[];
+  summary: {
+    crudApis: number;
+    authenticationApis: number;
+    paymentApis: number;
+    userApis: number;
+    highRisk: string[];
+    mediumRisk: string[];
+    lowRisk: string[];
+    currentTests: string[];
+    missingTests: string[];
+  };
+  rawCollection: unknown;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostmanRequest {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  collectionId: string;
+  apiEndpointId?: string;
+  folderId?: string;
+  folderPath?: string;
+  name: string;
+  description?: string;
+  method: string;
+  url: string;
+  headers: unknown[];
+  queryParams: unknown[];
+  pathParams: unknown[];
+  requestBody?: unknown;
+  authType: ApiAuthType;
+  variables: string[];
+  testScripts: string[];
+  testSummary: string[];
+  responseExamples: unknown[];
+  aiGenerated: boolean;
+  aiReadyStatus: "Ready" | "Needs Variables" | "Needs Tests" | "Needs Review";
+  riskLevel: ApiRiskLevel;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostmanImportResponse {
+  workspace: PostmanWorkspace;
+  requests: PostmanRequest[];
+  apiWorkspaceId?: string;
+  apiEndpoints: ApiEndpoint[];
+}
+
+export interface GeneratedApiTestSuite {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  apiWorkspaceId?: string;
+  endpointId?: string;
+  sourceType: ApiTestGenerationSourceType;
+  generationType: ApiTestGenerationType;
+  framework: ApiTestFramework;
+  environment?: string;
+  authProfile?: string;
+  status: "Generated" | "Partially Approved" | "Approved" | "Rejected";
+  totalTests: number;
+  approvedTests: number;
+  rejectedTests: number;
+  aiProvider: string;
+  aiModel: string;
+  qualityScore: number;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeneratedApiTest {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  generatedSuiteId: string;
+  apiWorkspaceId?: string;
+  endpointId?: string;
+  title: string;
+  testType: ApiTestGenerationType;
+  priority: ModulePriority;
+  method: string;
+  endpoint: string;
+  headers: unknown;
+  queryParams: unknown;
+  pathParams: unknown;
+  requestBody: unknown;
+  expectedStatus: number;
+  expectedResponse: unknown;
+  assertions: string[];
+  riskLevel: ApiRiskLevel;
+  executableCode: string;
+  framework: ApiTestFramework;
+  status: GeneratedApiTestStatus;
+  aiConfidence: number;
+  qualityScores: {
+    schemaCoverage: number;
+    requirementCoverage: number;
+    authCoverage: number;
+    negativeCaseCoverage: number;
+    contractCoverage: number;
+    securityCoverage: number;
+    overall: number;
+  };
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiTestGenerationResponse {
+  suite: GeneratedApiTestSuite;
+  tests: GeneratedApiTest[];
 }
 
 export interface RepositoryAnalysis {
@@ -1907,6 +2128,116 @@ export const projectApi = {
       body: JSON.stringify(input),
     }),
   getDashboard: () => apiRequest<DashboardStats>("/api/dashboard"),
+  importApiWorkspaceUpload: (input: { workspaceId?: string; projectId?: string; fileName: string; content: string }) =>
+    apiRequest<ApiWorkspaceImportResponse>("/api/api-workspaces/import/upload", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  importApiWorkspaceUrl: (input: { workspaceId?: string; projectId?: string; url: string; sourceType?: "swagger_url" | "api_url" }) =>
+    apiRequest<ApiWorkspaceImportResponse>("/api/api-workspaces/import/url", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  importApiWorkspaceGitHub: (input: { workspaceId?: string; projectId?: string; owner: string; repo: string; path: string; branch?: string }) =>
+    apiRequest<ApiWorkspaceImportResponse>("/api/api-workspaces/import/github", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listApiWorkspaces: (filters: { workspaceId?: string; projectId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.workspaceId) params.set("workspaceId", filters.workspaceId);
+    if (filters.projectId) params.set("projectId", filters.projectId);
+    const query = params.toString();
+    return apiRequest<ApiWorkspace[]>(`/api/api-workspaces${query ? `?${query}` : ""}`);
+  },
+  getApiWorkspace: (apiWorkspaceId: string) => apiRequest<ApiWorkspace>(`/api/api-workspaces/${apiWorkspaceId}`),
+  listApiEndpoints: (apiWorkspaceId: string) => apiRequest<ApiEndpoint[]>(`/api/api-workspaces/${apiWorkspaceId}/endpoints`),
+  getApiEndpoint: (apiWorkspaceId: string, endpointId: string) =>
+    apiRequest<ApiEndpoint>(`/api/api-workspaces/${apiWorkspaceId}/endpoints/${endpointId}`),
+  deleteApiWorkspace: (apiWorkspaceId: string) => apiRequest<void>(`/api/api-workspaces/${apiWorkspaceId}`, { method: "DELETE" }),
+  importPostmanCollection: (input: { workspaceId?: string; projectId?: string; collection: string; sourceType?: PostmanSourceType; sourceUrl?: string; githubRepo?: string; githubPath?: string }) =>
+    apiRequest<PostmanImportResponse>("/api/postman/import", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  importPostmanEnvironment: (input: { postmanWorkspaceId: string; content: string; source?: "environment" | "global" }) =>
+    apiRequest<PostmanWorkspace>("/api/postman/import/environment", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  importPostmanGitHub: (input: { workspaceId?: string; projectId?: string; owner: string; repo: string; path: string; branch?: string }) =>
+    apiRequest<PostmanImportResponse>("/api/postman/import/github", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listPostmanWorkspaces: (filters: { workspaceId?: string; projectId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.workspaceId) params.set("workspaceId", filters.workspaceId);
+    if (filters.projectId) params.set("projectId", filters.projectId);
+    const query = params.toString();
+    return apiRequest<PostmanWorkspace[]>(`/api/postman/workspaces${query ? `?${query}` : ""}`);
+  },
+  getPostmanWorkspace: (postmanWorkspaceId: string) => apiRequest<PostmanWorkspace>(`/api/postman/workspaces/${postmanWorkspaceId}`),
+  listPostmanRequests: (postmanWorkspaceId: string) => apiRequest<PostmanRequest[]>(`/api/postman/workspaces/${postmanWorkspaceId}/requests`),
+  listPostmanVariables: (postmanWorkspaceId: string) => apiRequest<PostmanVariable[]>(`/api/postman/workspaces/${postmanWorkspaceId}/variables`),
+  getPostmanSummary: (postmanWorkspaceId: string) => apiRequest<PostmanWorkspace["summary"]>(`/api/postman/workspaces/${postmanWorkspaceId}/summary`),
+  deletePostmanWorkspace: (postmanWorkspaceId: string) => apiRequest<void>(`/api/postman/workspaces/${postmanWorkspaceId}`, { method: "DELETE" }),
+  generateApiTests: (input: {
+    workspaceId?: string;
+    projectId?: string;
+    endpointId?: string;
+    apiWorkspaceId?: string;
+    requirementText?: string;
+    manualEndpoint?: { method: string; endpoint: string };
+    generationType?: ApiTestGenerationType;
+    framework?: ApiTestFramework;
+    environment?: string;
+    authProfile?: string;
+    priority?: ModulePriority;
+    numberOfTests?: number;
+  }) => apiRequest<ApiTestGenerationResponse>("/api/api-test-generation/generate", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  generateApiTestsForEndpoint: (endpointId: string, input: {
+    workspaceId?: string;
+    projectId?: string;
+    generationType?: ApiTestGenerationType;
+    framework?: ApiTestFramework;
+    environment?: string;
+    authProfile?: string;
+    priority?: ModulePriority;
+    numberOfTests?: number;
+  }) => apiRequest<ApiTestGenerationResponse>(`/api/api-test-generation/generate-endpoint/${endpointId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  generateApiTestsForCollection: (apiWorkspaceId: string, input: {
+    workspaceId?: string;
+    projectId?: string;
+    generationType?: ApiTestGenerationType;
+    framework?: ApiTestFramework;
+    environment?: string;
+    authProfile?: string;
+    priority?: ModulePriority;
+    numberOfTests?: number;
+  }) => apiRequest<ApiTestGenerationResponse>(`/api/api-test-generation/generate-collection/${apiWorkspaceId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  getGeneratedApiTestSuite: (generationId: string) => apiRequest<GeneratedApiTestSuite>(`/api/api-test-generation/${generationId}`),
+  listGeneratedApiTests: (generationId: string) => apiRequest<GeneratedApiTest[]>(`/api/api-test-generation/${generationId}/tests`),
+  updateGeneratedApiTest: (testId: string, input: Partial<GeneratedApiTest>) =>
+    apiRequest<{ test: GeneratedApiTest; suite: GeneratedApiTestSuite | null }>(`/api/api-test-generation/tests/${testId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  approveGeneratedApiTest: (testId: string) =>
+    apiRequest<{ test: GeneratedApiTest; suite: GeneratedApiTestSuite | null }>(`/api/api-test-generation/tests/${testId}/approve`, { method: "POST" }),
+  rejectGeneratedApiTest: (testId: string) =>
+    apiRequest<{ test: GeneratedApiTest; suite: GeneratedApiTestSuite | null }>(`/api/api-test-generation/tests/${testId}/reject`, { method: "POST" }),
+  regenerateGeneratedApiTest: (testId: string) =>
+    apiRequest<{ test: GeneratedApiTest; suite: GeneratedApiTestSuite | null }>(`/api/api-test-generation/tests/${testId}/regenerate`, { method: "POST" }),
   listProjects: () => apiRequest<ProjectSummary[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     apiRequest<ProjectSummary>("/api/projects", {

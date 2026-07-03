@@ -54,6 +54,8 @@ import {
   ExternalLink,
   Monitor,
   Keyboard,
+  Network,
+  KeyRound,
 } from "lucide-react";
 import {
   Area,
@@ -131,6 +133,11 @@ import {
   type AIProviderFeatureName,
   type AIProviderSettingsResponse,
   type AIProviderUsageLog,
+  type ApiEndpoint,
+  type ApiRiskLevel,
+  type ApiTestFramework,
+  type ApiTestGenerationType,
+  type ApiWorkspace,
   type ApplicationRepositoryConfig,
   type ApplicationRepositoryType,
   type SaveAIProviderInput,
@@ -150,6 +157,10 @@ import {
   type ProjectDomain,
   type ProjectModule,
   type ProjectSummary,
+  type PostmanRequest,
+  type PostmanWorkspace,
+  type GeneratedApiTest,
+  type GeneratedApiTestSuite,
   type Requirement,
   type RepositoryAnalysis,
   type RepositoryActivity,
@@ -953,6 +964,12 @@ export default function AppShell() {
             repositoryActivities={repositoryActivities}
             isLoading={isIntegrationLoading}
             onRefresh={() => refreshIntegrations(selectedWorkspaceId || auth?.workspace?.id || "")}
+          />
+        ) : activeView === "api-workspace" ? (
+          <ApiWorkspacePage
+            workspaceId={selectedWorkspaceId || auth?.workspace?.id || ""}
+            projects={projects}
+            role={auth.role}
           />
         ) : activeView === "pricing" || activeView === "settings-billing" ? (
           <PricingPage
@@ -3902,6 +3919,1018 @@ function SettingsSection({
       </div>
       {children}
     </div>
+  );
+}
+
+function apiRiskBadgeClass(risk: ApiRiskLevel) {
+  if (risk === "High") return "border-red-200 bg-red-50 text-red-700";
+  if (risk === "Medium") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+function methodBadgeClass(method: string) {
+  const value = method.toUpperCase();
+  if (value === "GET") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (value === "POST") return "border-blue-200 bg-blue-50 text-blue-700";
+  if (["PUT", "PATCH"].includes(value)) return "border-amber-200 bg-amber-50 text-amber-700";
+  if (value === "DELETE") return "border-red-200 bg-red-50 text-red-700";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function SchemaPreview({ value }: { value: unknown }) {
+  if (!value) return <p className="text-sm text-muted-foreground">Not defined</p>;
+  return (
+    <pre className="max-h-72 overflow-auto rounded-lg border bg-slate-950 p-4 text-xs text-slate-100">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
+function ApiWorkspacePage({
+  workspaceId,
+  projects,
+  role,
+}: {
+  workspaceId: string;
+  projects: ProjectSummary[];
+  role: WorkspaceRole;
+}) {
+  const [workspaces, setWorkspaces] = useState<ApiWorkspace[]>([]);
+  const [postmanWorkspaces, setPostmanWorkspaces] = useState<PostmanWorkspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
+  const [selectedPostmanId, setSelectedPostmanId] = useState("");
+  const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([]);
+  const [postmanRequests, setPostmanRequests] = useState<PostmanRequest[]>([]);
+  const [selectedEndpoint, setSelectedEndpoint] = useState<ApiEndpoint | null>(null);
+  const [selectedPostmanRequest, setSelectedPostmanRequest] = useState<PostmanRequest | null>(null);
+  const [generatedSuite, setGeneratedSuite] = useState<GeneratedApiTestSuite | null>(null);
+  const [generatedTests, setGeneratedTests] = useState<GeneratedApiTest[]>([]);
+  const [selectedGeneratedTest, setSelectedGeneratedTest] = useState<GeneratedApiTest | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isGeneratingApiTests, setIsGeneratingApiTests] = useState(false);
+  const [projectId, setProjectId] = useState("none");
+  const [apiGenerationType, setApiGenerationType] = useState<ApiTestGenerationType>("all");
+  const [apiFramework, setApiFramework] = useState<ApiTestFramework>("playwright");
+  const [apiTestCount, setApiTestCount] = useState("8");
+  const [manualApiMethod, setManualApiMethod] = useState("GET");
+  const [manualApiEndpoint, setManualApiEndpoint] = useState("");
+  const [apiRequirementText, setApiRequirementText] = useState("");
+  const [swaggerUrl, setSwaggerUrl] = useState("");
+  const [apiUrl, setApiUrl] = useState("");
+  const [githubForm, setGithubForm] = useState({ owner: "", repo: "", path: "", branch: "main" });
+  const [postmanGithubForm, setPostmanGithubForm] = useState({ owner: "", repo: "", path: "", branch: "main" });
+  const canImport = ["Owner", "Admin", "QA Lead"].includes(role);
+  const canDelete = ["Owner", "Admin"].includes(role);
+  const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId) ?? workspaces[0] ?? null;
+  const selectedPostman = postmanWorkspaces.find((item) => item.id === selectedPostmanId) ?? postmanWorkspaces[0] ?? null;
+
+  const loadWorkspaces = async () => {
+    setIsLoading(true);
+    try {
+      const [list, postmanList] = await Promise.all([
+        projectApi.listApiWorkspaces({ workspaceId }),
+        projectApi.listPostmanWorkspaces({ workspaceId }),
+      ]);
+      setWorkspaces(list);
+      setPostmanWorkspaces(postmanList);
+      const nextId = selectedWorkspaceId && list.some((item) => item.id === selectedWorkspaceId)
+        ? selectedWorkspaceId
+        : list[0]?.id ?? "";
+      const nextPostmanId = selectedPostmanId && postmanList.some((item) => item.id === selectedPostmanId)
+        ? selectedPostmanId
+        : postmanList[0]?.id ?? "";
+      setSelectedWorkspaceId(nextId);
+      setSelectedPostmanId(nextPostmanId);
+      const [nextEndpoints, nextPostmanRequests] = await Promise.all([
+        nextId ? projectApi.listApiEndpoints(nextId) : Promise.resolve([]),
+        nextPostmanId ? projectApi.listPostmanRequests(nextPostmanId) : Promise.resolve([]),
+      ]);
+      setEndpoints(nextEndpoints);
+      setPostmanRequests(nextPostmanRequests);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load API workspaces.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadWorkspaces();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
+  const selectWorkspace = async (apiWorkspaceId: string) => {
+    setSelectedWorkspaceId(apiWorkspaceId);
+    setSelectedEndpoint(null);
+    setIsLoading(true);
+    try {
+      setEndpoints(await projectApi.listApiEndpoints(apiWorkspaceId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load endpoints.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const selectPostmanWorkspace = async (postmanWorkspaceId: string) => {
+    setSelectedPostmanId(postmanWorkspaceId);
+    setSelectedPostmanRequest(null);
+    setIsLoading(true);
+    try {
+      setPostmanRequests(await projectApi.listPostmanRequests(postmanWorkspaceId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load Postman requests.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const importSpec = async (runner: () => Promise<unknown>) => {
+    if (!canImport) {
+      toast.error("You do not have permission to import API specifications.");
+      return;
+    }
+    setIsImporting(true);
+    try {
+      await runner();
+      toast.success("API specification imported successfully.");
+      await loadWorkspaces();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "API import failed.");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const onUploadFile = async (file?: File) => {
+    if (!file) return;
+    const content = await file.text();
+    await importSpec(() => projectApi.importApiWorkspaceUpload({
+      workspaceId,
+      projectId: projectId === "none" ? undefined : projectId,
+      fileName: file.name,
+      content,
+    }));
+  };
+
+  const onUploadPostmanCollection = async (file?: File) => {
+    if (!file) return;
+    const collection = await file.text();
+    await importSpec(() => projectApi.importPostmanCollection({
+      workspaceId,
+      projectId: projectId === "none" ? undefined : projectId,
+      collection,
+      sourceType: "upload",
+    }));
+  };
+
+  const onUploadPostmanEnvironment = async (file: File | undefined, source: "environment" | "global") => {
+    if (!file || !selectedPostman) return;
+    const content = await file.text();
+    await importSpec(() => projectApi.importPostmanEnvironment({
+      postmanWorkspaceId: selectedPostman.id,
+      content,
+      source,
+    }));
+  };
+
+  const viewEndpoint = async (endpoint: ApiEndpoint) => {
+    try {
+      setSelectedEndpoint(await projectApi.getApiEndpoint(endpoint.apiWorkspaceId, endpoint.id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load endpoint details.");
+    }
+  };
+
+  const deleteWorkspace = async (apiWorkspaceId: string) => {
+    if (!canDelete) {
+      toast.error("Only Owner/Admin can delete API workspaces.");
+      return;
+    }
+    if (!window.confirm("Delete this API workspace and all imported endpoints?")) return;
+    try {
+      await projectApi.deleteApiWorkspace(apiWorkspaceId);
+      toast.success("API workspace deleted.");
+      await loadWorkspaces();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete API workspace.");
+    }
+  };
+
+  const deletePostmanWorkspace = async (postmanWorkspaceId: string) => {
+    if (!canDelete) {
+      toast.error("Only Owner/Admin can delete Postman collections.");
+      return;
+    }
+    if (!window.confirm("Delete this Postman collection and its converted API inventory?")) return;
+    try {
+      await projectApi.deletePostmanWorkspace(postmanWorkspaceId);
+      toast.success("Postman collection deleted.");
+      await loadWorkspaces();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete Postman collection.");
+    }
+  };
+
+  const authTypes = selectedWorkspace?.authTypes?.length ? selectedWorkspace.authTypes.join(", ") : "Not detected";
+  const serverUrl = selectedWorkspace?.serverUrls?.[0] ?? "Not detected";
+  const highRiskCount = endpoints.filter((endpoint) => endpoint.riskLevel === "High").length;
+  const postmanHighRiskCount = postmanRequests.filter((request) => request.riskLevel === "High").length;
+  const generatedApprovedCount = generatedTests.filter((test) => test.status === "Approved").length;
+
+  const loadGeneratedTests = async (suiteId: string, suiteOverride?: GeneratedApiTestSuite | null) => {
+    const [suite, tests] = await Promise.all([
+      suiteOverride ? Promise.resolve(suiteOverride) : projectApi.getGeneratedApiTestSuite(suiteId),
+      projectApi.listGeneratedApiTests(suiteId),
+    ]);
+    setGeneratedSuite(suite);
+    setGeneratedTests(tests);
+  };
+
+  const generateApiTests = async (scope: "collection" | "endpoint" | "manual", endpoint?: ApiEndpoint) => {
+    setIsGeneratingApiTests(true);
+    try {
+      const baseInput = {
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        generationType: apiGenerationType,
+        framework: apiFramework,
+        priority: "High" as ModulePriority,
+        numberOfTests: Number(apiTestCount) || 8,
+        requirementText: apiRequirementText || undefined,
+      };
+      const result = scope === "endpoint" && endpoint
+        ? await projectApi.generateApiTestsForEndpoint(endpoint.id, baseInput)
+        : scope === "collection" && selectedWorkspace
+          ? await projectApi.generateApiTestsForCollection(selectedWorkspace.id, baseInput)
+          : await projectApi.generateApiTests({
+            ...baseInput,
+            manualEndpoint: { method: manualApiMethod, endpoint: manualApiEndpoint || "/api/resource" },
+          });
+      setGeneratedSuite(result.suite);
+      setGeneratedTests(result.tests);
+      toast.success(`Generated ${result.tests.length} API tests`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to generate API tests.");
+    } finally {
+      setIsGeneratingApiTests(false);
+    }
+  };
+
+  const updateGeneratedTestStatus = async (testId: string, action: "approve" | "reject" | "regenerate") => {
+    try {
+      const result = action === "approve"
+        ? await projectApi.approveGeneratedApiTest(testId)
+        : action === "reject"
+          ? await projectApi.rejectGeneratedApiTest(testId)
+          : await projectApi.regenerateGeneratedApiTest(testId);
+      if (result.suite) await loadGeneratedTests(result.suite.id, result.suite);
+      toast.success(action === "approve" ? "API test approved" : action === "reject" ? "API test rejected" : "API test regenerated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update generated API test.");
+    }
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-col gap-4 rounded-[2rem] border bg-card/90 p-6 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <Badge variant="outline" className="mb-4 border-primary/30 bg-primary/10 text-primary">API Testing Intelligence</Badge>
+          <h1 className="font-display text-3xl font-semibold text-foreground">API Workspace</h1>
+          <p className="mt-2 max-w-3xl text-muted-foreground">
+            Import Swagger/OpenAPI specifications, detect endpoints and contracts, and prepare APIs for AI test generation, contract checks, and release readiness.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="outline">{workspaces.length} specs</Badge>
+          <Badge variant="outline">{postmanWorkspaces.length} Postman collections</Badge>
+          <Badge variant="outline">{endpoints.length} endpoints</Badge>
+          <Badge variant="outline" className={(highRiskCount + postmanHighRiskCount) ? "border-red-200 bg-red-50 text-red-700" : ""}>{highRiskCount + postmanHighRiskCount} high risk</Badge>
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.35fr]">
+        <Card className="p-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-primary/10 p-3 text-primary"><Network className="size-5" /></div>
+            <div>
+              <h2 className="font-display text-xl font-semibold">Import API Specification</h2>
+              <p className="text-sm text-muted-foreground">Supports OpenAPI 3.x, Swagger 2.0, JSON, and YAML.</p>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <label className="text-sm font-semibold">Project</label>
+            <Select value={projectId} onValueChange={setProjectId}>
+              <SelectTrigger className="mt-2"><SelectValue placeholder="Optional project" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No project selected</SelectItem>
+                {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Tabs defaultValue="upload" className="mt-5">
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="upload">Upload</TabsTrigger>
+              <TabsTrigger value="swagger">URL</TabsTrigger>
+              <TabsTrigger value="github">GitHub</TabsTrigger>
+              <TabsTrigger value="api">API URL</TabsTrigger>
+              <TabsTrigger value="postman">Postman</TabsTrigger>
+            </TabsList>
+            <TabsContent value="upload" className="mt-4 space-y-3">
+              <Input
+                type="file"
+                accept=".json,.yaml,.yml,application/json"
+                disabled={!canImport || isImporting}
+                onChange={(event) => void onUploadFile(event.target.files?.[0])}
+              />
+              <p className="text-xs text-muted-foreground">Upload a Swagger/OpenAPI JSON or YAML file from your machine.</p>
+            </TabsContent>
+            <TabsContent value="swagger" className="mt-4 space-y-3">
+              <Input value={swaggerUrl} onChange={(event) => setSwaggerUrl(event.target.value)} placeholder="https://example.com/openapi.json" />
+              <Button disabled={!canImport || isImporting || !swaggerUrl} onClick={() => void importSpec(() => projectApi.importApiWorkspaceUrl({ workspaceId, projectId: projectId === "none" ? undefined : projectId, url: swaggerUrl, sourceType: "swagger_url" }))}>
+                {isImporting ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+                Import Swagger URL
+              </Button>
+            </TabsContent>
+            <TabsContent value="github" className="mt-4 grid gap-3 sm:grid-cols-2">
+              <Input value={githubForm.owner} onChange={(event) => setGithubForm((value) => ({ ...value, owner: event.target.value }))} placeholder="Repository owner" />
+              <Input value={githubForm.repo} onChange={(event) => setGithubForm((value) => ({ ...value, repo: event.target.value }))} placeholder="Repository name" />
+              <Input value={githubForm.branch} onChange={(event) => setGithubForm((value) => ({ ...value, branch: event.target.value }))} placeholder="Branch" />
+              <Input value={githubForm.path} onChange={(event) => setGithubForm((value) => ({ ...value, path: event.target.value }))} placeholder="docs/openapi.yaml" />
+              <Button className="sm:col-span-2" disabled={!canImport || isImporting || !githubForm.owner || !githubForm.repo || !githubForm.path} onClick={() => void importSpec(() => projectApi.importApiWorkspaceGitHub({ workspaceId, projectId: projectId === "none" ? undefined : projectId, ...githubForm }))}>
+                {isImporting ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />}
+                Import from GitHub
+              </Button>
+            </TabsContent>
+            <TabsContent value="api" className="mt-4 space-y-3">
+              <Input value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} placeholder="https://api.example.com/swagger.yaml" />
+              <Button disabled={!canImport || isImporting || !apiUrl} onClick={() => void importSpec(() => projectApi.importApiWorkspaceUrl({ workspaceId, projectId: projectId === "none" ? undefined : projectId, url: apiUrl, sourceType: "api_url" }))}>
+                {isImporting ? <Loader2 className="size-4 animate-spin" /> : <Network className="size-4" />}
+                Import API URL
+              </Button>
+            </TabsContent>
+            <TabsContent value="postman" className="mt-4 space-y-4">
+              <div className="rounded-2xl border bg-muted/30 p-4">
+                <p className="font-semibold">Import Postman Collection</p>
+                <p className="mt-1 text-xs text-muted-foreground">Collection v2/v2.1 imports become AI-ready API workspaces with requests, variables, auth, tests, and risk analysis.</p>
+                <Input
+                  className="mt-3"
+                  type="file"
+                  accept=".json,application/json"
+                  disabled={!canImport || isImporting}
+                  onChange={(event) => void onUploadPostmanCollection(event.target.files?.[0])}
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border bg-muted/30 p-4">
+                  <p className="font-semibold">Upload Environment</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Attach Local, QA, UAT, Staging, or Production variables to the selected collection.</p>
+                  <Input className="mt-3" type="file" accept=".json,application/json" disabled={!canImport || !selectedPostman || isImporting} onChange={(event) => void onUploadPostmanEnvironment(event.target.files?.[0], "environment")} />
+                </div>
+                <div className="rounded-2xl border bg-muted/30 p-4">
+                  <p className="font-semibold">Upload Globals</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Import shared global variables for variable resolution.</p>
+                  <Input className="mt-3" type="file" accept=".json,application/json" disabled={!canImport || !selectedPostman || isImporting} onChange={(event) => void onUploadPostmanEnvironment(event.target.files?.[0], "global")} />
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input value={postmanGithubForm.owner} onChange={(event) => setPostmanGithubForm((value) => ({ ...value, owner: event.target.value }))} placeholder="GitHub owner" />
+                <Input value={postmanGithubForm.repo} onChange={(event) => setPostmanGithubForm((value) => ({ ...value, repo: event.target.value }))} placeholder="Repository name" />
+                <Input value={postmanGithubForm.branch} onChange={(event) => setPostmanGithubForm((value) => ({ ...value, branch: event.target.value }))} placeholder="Branch" />
+                <Input value={postmanGithubForm.path} onChange={(event) => setPostmanGithubForm((value) => ({ ...value, path: event.target.value }))} placeholder="collections/api.postman_collection.json" />
+                <Button className="sm:col-span-2" disabled={!canImport || isImporting || !postmanGithubForm.owner || !postmanGithubForm.repo || !postmanGithubForm.path} onClick={() => void importSpec(() => projectApi.importPostmanGitHub({ workspaceId, projectId: projectId === "none" ? undefined : projectId, ...postmanGithubForm }))}>
+                  {isImporting ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />}
+                  Import Postman from GitHub
+                </Button>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          {!canImport && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Your role can view API workspaces. Import access is available for Owner, Admin, and QA Lead.
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-display text-xl font-semibold">Imported API Workspaces</h2>
+              <p className="text-sm text-muted-foreground">Select a specification to review inventory and endpoint details.</p>
+            </div>
+            <Button variant="outline" onClick={() => void loadWorkspaces()} disabled={isLoading}>
+              {isLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              Refresh
+            </Button>
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            {isLoading && !workspaces.length ? (
+              Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-24 rounded-2xl" />)
+            ) : workspaces.length ? (
+              workspaces.map((workspace) => (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  onClick={() => void selectWorkspace(workspace.id)}
+                  className={cn(
+                    "rounded-2xl border p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                    selectedWorkspace?.id === workspace.id && "border-primary/50 bg-primary/5",
+                  )}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-foreground">{workspace.name}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{workspace.version || "No version"} · {workspace.totalEndpoints} endpoints</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline">{workspace.format}</Badge>
+                      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">{workspace.importStatus}</Badge>
+                    </div>
+                  </div>
+                  <p className="mt-3 truncate text-xs text-muted-foreground">{workspace.sourceUrl || workspace.githubRepo || "Uploaded file"} · Imported {formatDate(workspace.createdAt)}</p>
+                </button>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed p-8 text-center">
+                <Network className="mx-auto size-8 text-primary" />
+                <h3 className="mt-3 font-semibold">No API workspaces yet</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Import Swagger or OpenAPI to create your API inventory.</p>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Badge variant="outline" className="mb-3 border-primary/30 bg-primary/10 text-primary">AI API Test Generation</Badge>
+            <h2 className="font-display text-xl font-semibold">Generate API Tests</h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              Generate positive, negative, edge, contract, security, and performance tests from imported API schemas, Postman requests, requirements, or a manual endpoint.
+            </p>
+          </div>
+          {generatedSuite && (
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">Quality {generatedSuite.qualityScore}%</Badge>
+              <Badge variant="outline">{generatedApprovedCount}/{generatedSuite.totalTests} approved</Badge>
+              <Badge variant="outline">{generatedSuite.framework}</Badge>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Test Type</label>
+                <Select value={apiGenerationType} onValueChange={(value) => setApiGenerationType(value as ApiTestGenerationType)}>
+                  <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="positive">Positive</SelectItem>
+                    <SelectItem value="negative">Negative</SelectItem>
+                    <SelectItem value="edge">Edge Cases</SelectItem>
+                    <SelectItem value="contract">Contract</SelectItem>
+                    <SelectItem value="security">Security</SelectItem>
+                    <SelectItem value="performance">Performance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Framework</label>
+                <Select value={apiFramework} onValueChange={(value) => setApiFramework(value as ApiTestFramework)}>
+                  <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="playwright">Playwright API</SelectItem>
+                    <SelectItem value="axios">Axios</SelectItem>
+                    <SelectItem value="supertest">Supertest</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Number of Tests</label>
+                <Input className="mt-2" value={apiTestCount} onChange={(event) => setApiTestCount(event.target.value)} />
+              </div>
+            </div>
+            <Textarea
+              value={apiRequirementText}
+              onChange={(event) => setApiRequirementText(event.target.value)}
+              placeholder="Optional requirement, user story, or acceptance criteria to guide API test generation."
+              rows={3}
+            />
+            <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
+              <Select value={manualApiMethod} onValueChange={setManualApiMethod}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["GET", "POST", "PUT", "PATCH", "DELETE"].map((method) => <SelectItem key={method} value={method}>{method}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input value={manualApiEndpoint} onChange={(event) => setManualApiEndpoint(event.target.value)} placeholder="/api/manual-endpoint" />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={isGeneratingApiTests || !selectedWorkspace} onClick={() => void generateApiTests("collection")}>
+                {isGeneratingApiTests ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                Generate From Collection
+              </Button>
+              <Button variant="outline" disabled={isGeneratingApiTests} onClick={() => void generateApiTests("manual")}>
+                <Code2 className="size-4" />
+                Generate Manual Endpoint
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-muted/20 p-4">
+            <p className="font-semibold">API Quality Score</p>
+            <p className="mt-1 text-sm text-muted-foreground">Generated API suites calculate schema, auth, negative, contract, security, and overall quality coverage.</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <MiniStat label="Overall Quality" value={generatedSuite ? `${generatedSuite.qualityScore}%` : "No suite"} />
+              <MiniStat label="Approved Tests" value={generatedSuite ? generatedApprovedCount : 0} />
+              <MiniStat label="Output Framework" value={generatedSuite?.framework ?? apiFramework} />
+            </div>
+            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              Generated code uses `BASE_URL`, `API_TOKEN`, `API_KEY`, and other environment-safe placeholders. Real secrets are never generated or hardcoded.
+            </div>
+          </div>
+        </div>
+
+        {generatedTests.length > 0 && (
+          <div className="mt-5 overflow-hidden rounded-2xl border">
+            <div className="border-b bg-muted/40 p-4">
+              <p className="font-semibold">Generated API Test Review</p>
+              <p className="text-sm text-muted-foreground">Review, approve, reject, edit, or regenerate generated API tests before future runner/contract workflows.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-muted/60 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Title</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Endpoint</th>
+                    <th className="px-4 py-3">Priority</th>
+                    <th className="px-4 py-3">Quality</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {generatedTests.map((test) => (
+                    <tr key={test.id} className="hover:bg-muted/40">
+                      <td className="max-w-sm px-4 py-3 font-semibold">{test.title}</td>
+                      <td className="px-4 py-3"><Badge variant="outline">{test.testType}</Badge></td>
+                      <td className="px-4 py-3 font-mono text-xs">{test.method} {test.endpoint}</td>
+                      <td className="px-4 py-3">{test.priority}</td>
+                      <td className="px-4 py-3">{test.qualityScores.overall}%</td>
+                      <td className="px-4 py-3"><Badge variant="outline">{test.status}</Badge></td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedGeneratedTest(test)}><Eye className="size-4" />Review</Button>
+                          <Button variant="ghost" size="sm" onClick={() => void updateGeneratedTestStatus(test.id, "approve")} disabled={test.status === "Approved"}>Approve</Button>
+                          <Button variant="ghost" size="sm" onClick={() => void updateGeneratedTestStatus(test.id, "reject")} disabled={test.status === "Rejected"}>Reject</Button>
+                          <Button variant="ghost" size="sm" onClick={() => void updateGeneratedTestStatus(test.id, "regenerate")}>Regenerate</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-display text-xl font-semibold">Postman Intelligence</h2>
+            <p className="text-sm text-muted-foreground">Imported collections are analyzed for folders, variables, authentication, existing tests, health, and AI readiness.</p>
+          </div>
+          <Badge variant="outline">{postmanRequests.length} imported requests</Badge>
+        </div>
+
+        {postmanWorkspaces.length ? (
+          <div className="mt-5 grid gap-4 lg:grid-cols-[0.75fr_1.25fr]">
+            <div className="space-y-3">
+              {postmanWorkspaces.map((workspace) => (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  onClick={() => void selectPostmanWorkspace(workspace.id)}
+                  className={cn(
+                    "w-full rounded-2xl border p-4 text-left transition hover:border-primary/40 hover:bg-primary/5",
+                    selectedPostman?.id === workspace.id && "border-primary/50 bg-primary/5",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{workspace.collectionName}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Postman v{workspace.collectionVersion || "2.x"} · {workspace.totalRequests} requests</p>
+                    </div>
+                    <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">{workspace.importStatus}</Badge>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <span>Health {workspace.healthScore}%</span>
+                    <span>AI Ready {workspace.aiReady}%</span>
+                    <span>{workspace.totalFolders} folders</span>
+                    <span>{workspace.totalVariables} variables</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {selectedPostman && (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <MiniStat label="Collection Health" value={`${selectedPostman.healthScore}%`} />
+                  <MiniStat label="AI Ready" value={`${selectedPostman.aiReady}%`} />
+                  <MiniStat label="Authentication" value={selectedPostman.authTypes.join(", ") || "No auth"} />
+                  <MiniStat label="Last Imported" value={formatDate(selectedPostman.updatedAt)} />
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Collection Summary</p>
+                    <div className="mt-3 space-y-2 text-sm">
+                      <p>CRUD APIs: <strong>{selectedPostman.summary.crudApis}</strong></p>
+                      <p>Auth APIs: <strong>{selectedPostman.summary.authenticationApis}</strong></p>
+                      <p>Payment APIs: <strong>{selectedPostman.summary.paymentApis}</strong></p>
+                      <p>User APIs: <strong>{selectedPostman.summary.userApis}</strong></p>
+                    </div>
+                  </Card>
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Current Tests</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(selectedPostman.summary.currentTests.length ? selectedPostman.summary.currentTests : ["No tests detected"]).map((item) => <Badge key={item} variant="outline">{item}</Badge>)}
+                    </div>
+                  </Card>
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Missing Tests</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedPostman.summary.missingTests.map((item) => <Badge key={item} variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">{item}</Badge>)}
+                    </div>
+                  </Card>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">Variables {selectedPostman.variables.length}</Badge>
+                    <Badge variant="outline">High Risk {postmanHighRiskCount}</Badge>
+                    <Badge variant="outline">AI Ready Requests {postmanRequests.filter((request) => request.aiReadyStatus === "Ready").length}</Badge>
+                  </div>
+                  {canDelete && (
+                    <Button variant="outline" className="text-red-600 hover:text-red-700" onClick={() => void deletePostmanWorkspace(selectedPostman.id)}>
+                      <Trash2 className="size-4" />
+                      Delete Collection
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-2xl border border-dashed p-8 text-center">
+            <FileText className="mx-auto size-8 text-primary" />
+            <h3 className="mt-3 font-semibold">No Postman collections imported</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Upload a Postman Collection JSON to migrate requests, variables, auth, and tests into AI QA Copilot.</p>
+          </div>
+        )}
+      </Card>
+
+      {selectedPostman && (
+        <Card className="overflow-hidden">
+          <div className="border-b p-5">
+            <h2 className="font-display text-xl font-semibold">Postman Request Inventory</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Requests are preserved as imported and converted into AI-ready API assets.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-muted/60 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Method</th>
+                  <th className="px-4 py-3">Request</th>
+                  <th className="px-4 py-3">Folder</th>
+                  <th className="px-4 py-3">Authentication</th>
+                  <th className="px-4 py-3">Existing Tests</th>
+                  <th className="px-4 py-3">Variables</th>
+                  <th className="px-4 py-3">AI Ready</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {postmanRequests.map((request) => (
+                  <tr key={request.id} className="hover:bg-muted/40">
+                    <td className="px-4 py-3"><Badge variant="outline" className={methodBadgeClass(request.method)}>{request.method}</Badge></td>
+                    <td className="max-w-sm px-4 py-3">
+                      <p className="font-semibold">{request.name}</p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">{request.url}</p>
+                    </td>
+                    <td className="px-4 py-3">{request.folderPath || "Root"}</td>
+                    <td className="px-4 py-3">{request.authType}</td>
+                    <td className="px-4 py-3">{request.testSummary.join(", ") || "Missing"}</td>
+                    <td className="px-4 py-3">{request.variables.length ? request.variables.join(", ") : "-"}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant="outline" className={request.aiReadyStatus === "Ready" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{request.aiReadyStatus}</Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setSelectedPostmanRequest(request)}>
+                          <Eye className="size-4" />
+                          View Request
+                        </Button>
+                        <Button variant="ghost" size="sm" disabled>Generate AI Tests</Button>
+                        <Button variant="ghost" size="sm" disabled>Run API</Button>
+                        <Button variant="ghost" size="sm" disabled>Variables</Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!postmanRequests.length && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">No Postman requests found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {selectedWorkspace && (
+        <>
+          <Card className="p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="font-display text-xl font-semibold">{selectedWorkspace.name}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{selectedWorkspace.description || "Imported API specification ready for API Testing Intelligence."}</p>
+              </div>
+              {canDelete && (
+                <Button variant="outline" className="text-red-600 hover:text-red-700" onClick={() => void deleteWorkspace(selectedWorkspace.id)}>
+                  <Trash2 className="size-4" />
+                  Delete
+                </Button>
+              )}
+            </div>
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniStat label="Server URL" value={serverUrl} />
+              <MiniStat label="Authentication" value={authTypes} />
+              <MiniStat label="Tags" value={selectedWorkspace.tags.length || "None"} />
+              <MiniStat label="Last Imported" value={formatDate(selectedWorkspace.updatedAt)} />
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <div className="border-b p-5">
+              <h2 className="font-display text-xl font-semibold">API Inventory</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Normalized endpoint inventory from the imported Swagger/OpenAPI specification.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-muted/60 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Method</th>
+                    <th className="px-4 py-3">Endpoint</th>
+                    <th className="px-4 py-3">Tag</th>
+                    <th className="px-4 py-3">Auth</th>
+                    <th className="px-4 py-3">Request Body</th>
+                    <th className="px-4 py-3">Responses</th>
+                    <th className="px-4 py-3">Risk</th>
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {endpoints.map((endpoint) => (
+                    <tr key={endpoint.id} className="hover:bg-muted/40">
+                      <td className="px-4 py-3"><Badge variant="outline" className={methodBadgeClass(endpoint.method)}>{endpoint.method}</Badge></td>
+                      <td className="max-w-sm px-4 py-3 font-mono text-xs">{endpoint.path}</td>
+                      <td className="px-4 py-3">{endpoint.tags[0] || "General"}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className={endpoint.authRequired ? "border-blue-200 bg-blue-50 text-blue-700" : ""}>
+                          <KeyRound className="mr-1 size-3" />
+                          {endpoint.authType}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">{endpoint.requestBodySchema ? "Yes" : "No"}</td>
+                      <td className="px-4 py-3">{endpoint.statusCodes.join(", ") || "-"}</td>
+                      <td className="px-4 py-3"><Badge variant="outline" className={apiRiskBadgeClass(endpoint.riskLevel)}>{endpoint.riskLevel}</Badge></td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => void viewEndpoint(endpoint)}>
+                            <Eye className="size-4" />
+                            Details
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => void generateApiTests("endpoint", endpoint)} disabled={isGeneratingApiTests}>Generate Tests</Button>
+                          <Button variant="ghost" size="sm" disabled>Run API</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!endpoints.length && (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">No endpoints found for this API workspace.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
+
+      <Dialog open={Boolean(selectedEndpoint)} onOpenChange={(open) => !open && setSelectedEndpoint(null)}>
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>API Endpoint Details</DialogTitle>
+          </DialogHeader>
+          {selectedEndpoint && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border bg-muted/40 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={methodBadgeClass(selectedEndpoint.method)}>{selectedEndpoint.method}</Badge>
+                  <code className="rounded bg-background px-2 py-1 text-sm">{selectedEndpoint.path}</code>
+                  <Badge variant="outline" className={apiRiskBadgeClass(selectedEndpoint.riskLevel)}>{selectedEndpoint.riskLevel} risk</Badge>
+                </div>
+                <h3 className="mt-4 font-semibold">{selectedEndpoint.summary || selectedEndpoint.operationId || "Untitled operation"}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{selectedEndpoint.description || "No description provided in the imported specification."}</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <MiniStat label="Tags" value={selectedEndpoint.tags.join(", ") || "General"} />
+                <MiniStat label="Auth Required" value={selectedEndpoint.authRequired ? "Yes" : "No"} />
+                <MiniStat label="Status Codes" value={selectedEndpoint.statusCodes.join(", ") || "-"} />
+              </div>
+              <Tabs defaultValue="parameters">
+                <TabsList className="grid w-full grid-cols-5">
+                  <TabsTrigger value="parameters">Parameters</TabsTrigger>
+                  <TabsTrigger value="headers">Headers</TabsTrigger>
+                  <TabsTrigger value="request">Request</TabsTrigger>
+                  <TabsTrigger value="response">Response</TabsTrigger>
+                  <TabsTrigger value="examples">Examples</TabsTrigger>
+                </TabsList>
+                <TabsContent value="parameters" className="mt-4"><SchemaPreview value={selectedEndpoint.parameters} /></TabsContent>
+                <TabsContent value="headers" className="mt-4"><SchemaPreview value={selectedEndpoint.headers} /></TabsContent>
+                <TabsContent value="request" className="mt-4"><SchemaPreview value={selectedEndpoint.requestBodySchema} /></TabsContent>
+                <TabsContent value="response" className="mt-4"><SchemaPreview value={selectedEndpoint.responseSchemas} /></TabsContent>
+                <TabsContent value="examples" className="mt-4"><SchemaPreview value={selectedEndpoint.examples} /></TabsContent>
+              </Tabs>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedPostmanRequest)} onOpenChange={(open) => !open && setSelectedPostmanRequest(null)}>
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Postman Request Detail</DialogTitle>
+          </DialogHeader>
+          {selectedPostmanRequest && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border bg-muted/40 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={methodBadgeClass(selectedPostmanRequest.method)}>{selectedPostmanRequest.method}</Badge>
+                  <Badge variant="outline" className={apiRiskBadgeClass(selectedPostmanRequest.riskLevel)}>{selectedPostmanRequest.riskLevel} risk</Badge>
+                  <Badge variant="outline">{selectedPostmanRequest.aiReadyStatus}</Badge>
+                </div>
+                <h3 className="mt-4 font-semibold">{selectedPostmanRequest.name}</h3>
+                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{selectedPostmanRequest.url}</p>
+                {selectedPostmanRequest.description && <p className="mt-3 text-sm text-muted-foreground">{selectedPostmanRequest.description}</p>}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <MiniStat label="Folder" value={selectedPostmanRequest.folderPath || "Root"} />
+                <MiniStat label="Authentication" value={selectedPostmanRequest.authType} />
+                <MiniStat label="Variables Used" value={selectedPostmanRequest.variables.length || "None"} />
+                <MiniStat label="Existing Tests" value={selectedPostmanRequest.testSummary.length || "Missing"} />
+              </div>
+
+              <Tabs defaultValue="headers">
+                <TabsList className="grid w-full grid-cols-6">
+                  <TabsTrigger value="headers">Headers</TabsTrigger>
+                  <TabsTrigger value="query">Query</TabsTrigger>
+                  <TabsTrigger value="path">Path</TabsTrigger>
+                  <TabsTrigger value="body">Body</TabsTrigger>
+                  <TabsTrigger value="tests">Tests</TabsTrigger>
+                  <TabsTrigger value="examples">Examples</TabsTrigger>
+                </TabsList>
+                <TabsContent value="headers" className="mt-4"><SchemaPreview value={selectedPostmanRequest.headers} /></TabsContent>
+                <TabsContent value="query" className="mt-4"><SchemaPreview value={selectedPostmanRequest.queryParams} /></TabsContent>
+                <TabsContent value="path" className="mt-4"><SchemaPreview value={selectedPostmanRequest.pathParams} /></TabsContent>
+                <TabsContent value="body" className="mt-4"><SchemaPreview value={selectedPostmanRequest.requestBody} /></TabsContent>
+                <TabsContent value="tests" className="mt-4">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {(selectedPostmanRequest.testSummary.length ? selectedPostmanRequest.testSummary : ["No test scripts detected"]).map((item) => <Badge key={item} variant="outline">{item}</Badge>)}
+                    </div>
+                    <SchemaPreview value={selectedPostmanRequest.testScripts} />
+                  </div>
+                </TabsContent>
+                <TabsContent value="examples" className="mt-4"><SchemaPreview value={selectedPostmanRequest.responseExamples} /></TabsContent>
+              </Tabs>
+
+              {selectedPostman?.variables?.length ? (
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Resolved Variables</p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {selectedPostman.variables.slice(0, 12).map((variable) => (
+                      <div key={`${variable.source}-${variable.name}`} className="rounded-xl border bg-muted/30 p-3">
+                        <p className="font-mono text-xs font-semibold">{variable.name}</p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">{variable.source} · {variable.resolvedValue || "No value"}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedGeneratedTest)} onOpenChange={(open) => !open && setSelectedGeneratedTest(null)}>
+        <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Generated API Test Review</DialogTitle>
+          </DialogHeader>
+          {selectedGeneratedTest && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border bg-muted/40 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={methodBadgeClass(selectedGeneratedTest.method)}>{selectedGeneratedTest.method}</Badge>
+                  <Badge variant="outline">{selectedGeneratedTest.testType}</Badge>
+                  <Badge variant="outline" className={apiRiskBadgeClass(selectedGeneratedTest.riskLevel)}>{selectedGeneratedTest.riskLevel} risk</Badge>
+                  <Badge variant="outline">{selectedGeneratedTest.status}</Badge>
+                </div>
+                <h3 className="mt-4 font-semibold">{selectedGeneratedTest.title}</h3>
+                <p className="mt-1 font-mono text-xs text-muted-foreground">{selectedGeneratedTest.endpoint}</p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <MiniStat label="Expected Status" value={selectedGeneratedTest.expectedStatus} />
+                <MiniStat label="AI Confidence" value={`${selectedGeneratedTest.aiConfidence}%`} />
+                <MiniStat label="Overall Quality" value={`${selectedGeneratedTest.qualityScores.overall}%`} />
+                <MiniStat label="Framework" value={selectedGeneratedTest.framework} />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <MiniStat label="Schema Coverage" value={`${selectedGeneratedTest.qualityScores.schemaCoverage}%`} />
+                <MiniStat label="Auth Coverage" value={`${selectedGeneratedTest.qualityScores.authCoverage}%`} />
+                <MiniStat label="Security Coverage" value={`${selectedGeneratedTest.qualityScores.securityCoverage}%`} />
+              </div>
+
+              <Tabs defaultValue="case">
+                <TabsList className="grid w-full grid-cols-5">
+                  <TabsTrigger value="case">Test Case</TabsTrigger>
+                  <TabsTrigger value="request">Request</TabsTrigger>
+                  <TabsTrigger value="response">Expected</TabsTrigger>
+                  <TabsTrigger value="assertions">Assertions</TabsTrigger>
+                  <TabsTrigger value="code">Code</TabsTrigger>
+                </TabsList>
+                <TabsContent value="case" className="mt-4">
+                  <div className="rounded-2xl border p-4 text-sm">
+                    <p><strong>Preconditions:</strong> Configure environment variables and valid auth profile before execution.</p>
+                    <p className="mt-2"><strong>Priority:</strong> {selectedGeneratedTest.priority}</p>
+                    <p className="mt-2"><strong>Risk:</strong> {selectedGeneratedTest.riskLevel}</p>
+                    <p className="mt-2"><strong>Safety:</strong> Destructive methods must use seeded or disposable test data.</p>
+                  </div>
+                </TabsContent>
+                <TabsContent value="request" className="mt-4">
+                  <SchemaPreview value={{
+                    headers: selectedGeneratedTest.headers,
+                    queryParams: selectedGeneratedTest.queryParams,
+                    pathParams: selectedGeneratedTest.pathParams,
+                    body: selectedGeneratedTest.requestBody,
+                  }} />
+                </TabsContent>
+                <TabsContent value="response" className="mt-4">
+                  <SchemaPreview value={selectedGeneratedTest.expectedResponse} />
+                </TabsContent>
+                <TabsContent value="assertions" className="mt-4">
+                  <div className="space-y-2">
+                    {selectedGeneratedTest.assertions.map((assertion) => (
+                      <div key={assertion} className="rounded-xl border bg-muted/30 p-3 text-sm">{assertion}</div>
+                    ))}
+                  </div>
+                </TabsContent>
+                <TabsContent value="code" className="mt-4">
+                  <pre className="max-h-96 overflow-auto rounded-lg border bg-slate-950 p-4 text-xs text-slate-100">{selectedGeneratedTest.executableCode}</pre>
+                </TabsContent>
+              </Tabs>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={() => void navigator.clipboard.writeText(selectedGeneratedTest.executableCode).then(() => toast.success("Executable code copied"))}>
+                  <Copy className="size-4" />
+                  Copy Code
+                </Button>
+                <Button variant="outline" onClick={() => void updateGeneratedTestStatus(selectedGeneratedTest.id, "regenerate")}>Regenerate</Button>
+                <Button variant="outline" onClick={() => void updateGeneratedTestStatus(selectedGeneratedTest.id, "reject")}>Reject</Button>
+                <Button onClick={() => void updateGeneratedTestStatus(selectedGeneratedTest.id, "approve")}>Approve</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </section>
   );
 }
 

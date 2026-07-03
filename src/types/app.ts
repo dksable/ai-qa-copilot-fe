@@ -26,5 +26,6 @@ export type ActiveView =
   | "repository-playwright"
   | "repository-validation-history"
   | "repository-release-readiness"
+  | "api-workspace"
   | "workspace"
   | "analytics";
