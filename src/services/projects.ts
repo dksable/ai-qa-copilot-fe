@@ -515,6 +515,19 @@ export type ApiFailureCategory =
   | "Infrastructure Failure"
   | "Unknown";
 export type ApiFailureSeverity = "Low" | "Medium" | "High" | "Critical";
+export type ApiAutoFixStatus = "Pending" | "Approved" | "Rejected" | "Edited" | "Committed";
+export type ApiAutoFixType =
+  | "Authentication Fix"
+  | "Endpoint Fix"
+  | "Header Fix"
+  | "Request Body Fix"
+  | "Query Parameter Fix"
+  | "Path Parameter Fix"
+  | "Assertion Fix"
+  | "Contract Fix"
+  | "Environment Fix";
+export type ApiReleaseStatus = "READY" | "READY WITH CAUTION" | "NOT READY" | "BLOCKED";
+export type ApiReleaseRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type ContractValidationStatus = "Passed" | "Failed" | "Warning";
 export type ContractChangeType = "Missing Field" | "Additional Field" | "Type Change" | "Status Code Change" | "Enum Change" | "Structure Change" | "Header Change";
 export type ContractSeverity = "Low" | "Medium" | "High" | "Critical";
@@ -1436,6 +1449,150 @@ export interface ApiFailureAnalysis {
 export interface ApiFailureAnalysisResponse {
   analysis: ApiFailureAnalysis;
   evidence: ApiFailureEvidence[];
+}
+
+export interface ApiAutoFix {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  repositoryId?: string;
+  validationRunId?: string;
+  failureAnalysisId?: string;
+  endpointId?: string;
+  fixType: ApiAutoFixType;
+  confidenceScore: number;
+  repositoryMatchScore: number;
+  beforeCode: string;
+  afterCode: string;
+  explanation: string;
+  approved: boolean;
+  rejected: boolean;
+  committed: boolean;
+  commitSha?: string;
+  branch?: string;
+  status: ApiAutoFixStatus;
+  aiProvider: string;
+  aiModel: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAutoFixChange {
+  id: string;
+  autoFixId: string;
+  filePath: string;
+  endpoint?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  changeType: string;
+  beforeContent: string;
+  afterContent: string;
+  reason: string;
+  severity: ApiFailureSeverity;
+  createdAt: string;
+}
+
+export interface ApiAutoFixResponse {
+  fix: ApiAutoFix;
+  changes: ApiAutoFixChange[];
+}
+
+export interface ApiAutoFixDashboard {
+  pendingFixes: number;
+  approvedFixes: number;
+  rejectedFixes: number;
+  committedFixes: number;
+  fixSuccessRate: number;
+  averageAIConfidence: number;
+  mostCommonFixTypes: Array<[string, number]>;
+  repositoryMatchScore: number;
+}
+
+export interface ApiReleaseCriticalIssue {
+  id: string;
+  severity: ApiFailureSeverity;
+  endpoint?: string;
+  reason: string;
+  evidence: string;
+  recommendation: string;
+  owner?: string;
+}
+
+export interface ApiReleaseReadinessSnapshot {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  apiWorkspaceId?: string;
+  repositoryId?: string;
+  releaseName?: string;
+  releaseVersion?: string;
+  apiReleaseScore: number;
+  releaseStatus: ApiReleaseStatus;
+  aiConfidence: number;
+  riskLevel: ApiReleaseRiskLevel;
+  apiHealthScore: number;
+  validationSuccessRate: number;
+  contractCompatibilityScore: number;
+  apiCoverageScore: number;
+  performanceScore: number;
+  failedApisCount: number;
+  flakyApisCount: number;
+  highRiskApisCount: number;
+  criticalIssuesCount: number;
+  breakingChangesCount: number;
+  averageResponseTime: number;
+  p95ResponseTime: number;
+  finalRecommendation: string;
+  reasons: string[];
+  recommendedActions: string[];
+  criticalIssues: ApiReleaseCriticalIssue[];
+  rootCauseInsights: string[];
+  validationRunIds: string[];
+  contractValidationIds: string[];
+  failureAnalysisIds: string[];
+  autoFixIds: string[];
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiReleaseReadinessResponse {
+  snapshot: ApiReleaseReadinessSnapshot;
+  sections: {
+    validationHealth: {
+      totalValidations: number;
+      passedValidations: number;
+      failedValidations: number;
+      latestValidationStatus: string;
+      latestWorkflowUrl?: string;
+      failedEndpoints: ApiEndpoint[];
+    };
+    contractHealth: {
+      compatibilityScore: number;
+      passedContractChecks: number;
+      failedContractChecks: number;
+      breakingChanges: number;
+      missingFields: number;
+      typeMismatches: number;
+      statusCodeMismatches: number;
+    };
+    coverage: {
+      totalEndpoints: number;
+      testedEndpoints: number;
+      untestedEndpoints: number;
+      highRiskEndpointCoverage: number;
+      routeMappings: number;
+    };
+    performance: {
+      averageResponseTime: number;
+      p90ResponseTime: number;
+      p95ResponseTime: number;
+      p99ResponseTime: number;
+      slowestEndpoints: Array<{ endpoint: string; method: string; responseTime: number }>;
+    };
+  };
+  timeline: Array<{ label: string; status: string; timestamp: string; details?: string }>;
 }
 
 export interface ContractDifference {
@@ -2834,6 +2991,82 @@ export const projectApi = {
     apiRequest<{ recommendations: string[]; autoFixPossible: boolean }>(`/api/api-failure-analysis/recommendations/${analysisId}`),
   regenerateApiFailureAnalysis: (input: { analysisId?: string; validationRunId?: string }) =>
     apiRequest<ApiFailureAnalysisResponse>("/api/api-failure-analysis/regenerate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  generateApiAutoFix: (input: { failureAnalysisId?: string; validationRunId?: string }) =>
+    apiRequest<ApiAutoFixResponse[]>("/api/api-auto-fix/generate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  regenerateApiAutoFix: (input: { failureAnalysisId?: string; validationRunId?: string }) =>
+    apiRequest<ApiAutoFixResponse[]>("/api/api-auto-fix/regenerate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  getApiAutoFix: (fixId: string) => apiRequest<ApiAutoFixResponse>(`/api/api-auto-fix/${fixId}`),
+  listApiAutoFixesByValidation: (validationRunId: string) =>
+    apiRequest<ApiAutoFixResponse[]>(`/api/api-auto-fix/by-validation/${validationRunId}`),
+  approveApiAutoFix: (input: { fixId?: string; validationRunId?: string }) =>
+    apiRequest<ApiAutoFixResponse[]>("/api/api-auto-fix/approve", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  rejectApiAutoFix: (input: { fixId?: string; validationRunId?: string }) =>
+    apiRequest<ApiAutoFixResponse[]>("/api/api-auto-fix/reject", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  editApiAutoFix: (fixId: string, afterCode: string) =>
+    apiRequest<ApiAutoFixResponse>("/api/api-auto-fix/edit", {
+      method: "POST",
+      body: JSON.stringify({ fixId, afterCode }),
+    }),
+  commitApiAutoFix: (input: { fixId?: string; validationRunId?: string }) =>
+    apiRequest<{ branch: string; committed: ApiAutoFixResponse[] }>("/api/api-auto-fix/commit", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  retryAfterApiAutoFix: (validationRunId: string) =>
+    apiRequest<{ validationRunId: string; readyToRetry: boolean; message: string }>("/api/api-auto-fix/retry", {
+      method: "POST",
+      body: JSON.stringify({ validationRunId }),
+    }),
+  getApiAutoFixDashboard: (workspaceId?: string) =>
+    apiRequest<ApiAutoFixDashboard>(`/api/api-auto-fix/dashboard${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
+  getApiReleaseReadiness: (filters: { workspaceId?: string; projectId?: string; apiWorkspaceId?: string; repositoryId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.workspaceId) params.set("workspaceId", filters.workspaceId);
+    if (filters.projectId) params.set("projectId", filters.projectId);
+    if (filters.apiWorkspaceId) params.set("apiWorkspaceId", filters.apiWorkspaceId);
+    if (filters.repositoryId) params.set("repositoryId", filters.repositoryId);
+    const query = params.toString();
+    return apiRequest<ApiReleaseReadinessResponse>(`/api/api-release-readiness/summary${query ? `?${query}` : ""}`);
+  },
+  getApiReleaseReadinessWorkspace: (apiWorkspaceId: string, filters: { workspaceId?: string; projectId?: string; repositoryId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.workspaceId) params.set("workspaceId", filters.workspaceId);
+    if (filters.projectId) params.set("projectId", filters.projectId);
+    if (filters.repositoryId) params.set("repositoryId", filters.repositoryId);
+    const query = params.toString();
+    return apiRequest<ApiReleaseReadinessResponse>(`/api/api-release-readiness/workspace/${apiWorkspaceId}${query ? `?${query}` : ""}`);
+  },
+  getApiReleaseReadinessTimeline: (apiWorkspaceId: string, workspaceId?: string) =>
+    apiRequest<ApiReleaseReadinessResponse["timeline"]>(`/api/api-release-readiness/timeline/${apiWorkspaceId}${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
+  recalculateApiReleaseReadiness: (input: { workspaceId?: string; projectId?: string; apiWorkspaceId?: string; repositoryId?: string; releaseName?: string; releaseVersion?: string }) =>
+    apiRequest<ApiReleaseReadinessResponse>("/api/api-release-readiness/recalculate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  generateApiReleaseRecommendation: (input: { workspaceId?: string; projectId?: string; apiWorkspaceId?: string; repositoryId?: string }) =>
+    apiRequest<{
+      releaseStatus: ApiReleaseStatus;
+      confidenceScore: number;
+      riskLevel: ApiReleaseRiskLevel;
+      summary: string;
+      reasons: string[];
+      recommendedActions: string[];
+    }>("/api/api-release-readiness/ai-recommendation", {
       method: "POST",
       body: JSON.stringify(input),
     }),

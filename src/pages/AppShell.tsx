@@ -136,8 +136,11 @@ import {
   type AIProviderSettingsResponse,
   type AIProviderUsageLog,
   type ApiEndpoint,
+  type ApiAutoFixDashboard,
+  type ApiAutoFixResponse,
   type ApiFailureAnalysis,
   type ApiFailureEvidence,
+  type ApiReleaseReadinessResponse,
   type ApiImpactAnalysis,
   type ApiRepositoryCoverage,
   type ApiRepositoryDependencyGraph,
@@ -4050,6 +4053,9 @@ function ApiWorkspacePage({
   const [apiValidationResults, setApiValidationResults] = useState<ApiValidationResult[]>([]);
   const [apiFailureAnalysis, setApiFailureAnalysis] = useState<ApiFailureAnalysis | null>(null);
   const [apiFailureEvidence, setApiFailureEvidence] = useState<ApiFailureEvidence[]>([]);
+  const [apiAutoFixes, setApiAutoFixes] = useState<ApiAutoFixResponse[]>([]);
+  const [apiAutoFixDashboard, setApiAutoFixDashboard] = useState<ApiAutoFixDashboard | null>(null);
+  const [apiReleaseReadiness, setApiReleaseReadiness] = useState<ApiReleaseReadinessResponse | null>(null);
   const [latestCollectionSummary, setLatestCollectionSummary] = useState<{ total: number; passed: number; failed: number; errors: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -4058,6 +4064,8 @@ function ApiWorkspacePage({
   const [isValidatingContract, setIsValidatingContract] = useState(false);
   const [isRunningApiValidation, setIsRunningApiValidation] = useState(false);
   const [isAnalyzingApiFailure, setIsAnalyzingApiFailure] = useState(false);
+  const [isApiAutoFixLoading, setIsApiAutoFixLoading] = useState(false);
+  const [isApiReleaseLoading, setIsApiReleaseLoading] = useState(false);
   const [isScanningApiRepository, setIsScanningApiRepository] = useState(false);
   const [isAnalyzingApiImpact, setIsAnalyzingApiImpact] = useState(false);
   const [projectId, setProjectId] = useState("none");
@@ -4089,6 +4097,22 @@ function ApiWorkspacePage({
   const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId) ?? workspaces[0] ?? null;
   const selectedPostman = postmanWorkspaces.find((item) => item.id === selectedPostmanId) ?? postmanWorkspaces[0] ?? null;
   const selectedApiRepository = apiRepositories.find((item) => item.id === selectedApiRepositoryId || item.repositoryId === selectedApiRepositoryId) ?? apiRepositories[0] ?? null;
+
+  const loadApiReleaseReadiness = async (apiWorkspaceId?: string, repositoryId?: string) => {
+    const payload = apiWorkspaceId
+      ? await projectApi.getApiReleaseReadinessWorkspace(apiWorkspaceId, {
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        repositoryId,
+      })
+      : await projectApi.getApiReleaseReadiness({
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        repositoryId,
+      });
+    setApiReleaseReadiness(payload);
+    return payload;
+  };
 
   const loadWorkspaces = async () => {
     setIsLoading(true);
@@ -4132,6 +4156,7 @@ function ApiWorkspacePage({
       setApiValidations(validationHistory);
       setSelectedApiValidation(validationHistory[0] ?? null);
       setContractDashboard(await projectApi.getApiContractDashboard(workspaceId));
+      await loadApiReleaseReadiness(nextId, nextApiRepositoryId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load API workspaces.");
     } finally {
@@ -4150,6 +4175,7 @@ function ApiWorkspacePage({
     setIsLoading(true);
     try {
       setEndpoints(await projectApi.listApiEndpoints(apiWorkspaceId));
+      await loadApiReleaseReadiness(apiWorkspaceId, selectedApiRepositoryId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load endpoints.");
     } finally {
@@ -4550,6 +4576,9 @@ function ApiWorkspacePage({
     const failurePayload = await projectApi.getApiFailureAnalysisByValidation(validationId).catch(() => null);
     setApiFailureAnalysis(failurePayload?.analysis ?? null);
     setApiFailureEvidence(failurePayload?.evidence ?? []);
+    setApiAutoFixes(await projectApi.listApiAutoFixesByValidation(validationId).catch(() => []));
+    setApiAutoFixDashboard(await projectApi.getApiAutoFixDashboard(workspaceId).catch(() => null));
+    await loadApiReleaseReadiness(selectedWorkspace?.id, selectedApiRepository?.repositoryId ?? selectedApiRepository?.id).catch(() => null);
     return response.validationRun;
   };
 
@@ -4586,6 +4615,7 @@ function ApiWorkspacePage({
       setApiValidationResults([]);
       setApiFailureAnalysis(null);
       setApiFailureEvidence([]);
+      setApiAutoFixes([]);
       setApiValidations((items) => [run, ...items.filter((item) => item.id !== run.id)]);
       toast.success("API GitHub validation started.");
     } catch (error) {
@@ -4610,6 +4640,7 @@ function ApiWorkspacePage({
       setApiValidationResults([]);
       setApiFailureAnalysis(null);
       setApiFailureEvidence([]);
+      setApiAutoFixes([]);
       setApiValidations((items) => [run, ...items.filter((item) => item.id !== run.id)]);
       toast.success("API validation retry started.");
     } catch (error) {
@@ -4639,6 +4670,120 @@ function ApiWorkspacePage({
     }
   };
 
+  const generateSelectedApiAutoFix = async (regenerate = false) => {
+    if (!selectedApiValidation || !apiFailureAnalysis) return;
+    setIsApiAutoFixLoading(true);
+    try {
+      const fixes = regenerate
+        ? await projectApi.regenerateApiAutoFix({
+          failureAnalysisId: apiFailureAnalysis.id,
+          validationRunId: selectedApiValidation.id,
+        })
+        : await projectApi.generateApiAutoFix({
+          failureAnalysisId: apiFailureAnalysis.id,
+          validationRunId: selectedApiValidation.id,
+        });
+      setApiAutoFixes(fixes);
+      setApiAutoFixDashboard(await projectApi.getApiAutoFixDashboard(workspaceId).catch(() => null));
+      toast.success(regenerate ? "API auto fix regenerated." : "API auto fix generated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to generate API auto fix.");
+    } finally {
+      setIsApiAutoFixLoading(false);
+    }
+  };
+
+  const updateApiAutoFixStatus = async (fixId: string, action: "approve" | "reject") => {
+    setIsApiAutoFixLoading(true);
+    try {
+      const updated = action === "approve"
+        ? await projectApi.approveApiAutoFix({ fixId })
+        : await projectApi.rejectApiAutoFix({ fixId });
+      setApiAutoFixes((items) => items.map((item) => updated.find((payload) => payload?.fix.id === item.fix.id) ?? item));
+      setApiAutoFixDashboard(await projectApi.getApiAutoFixDashboard(workspaceId).catch(() => null));
+      toast.success(action === "approve" ? "API fix approved." : "API fix rejected.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update API fix.");
+    } finally {
+      setIsApiAutoFixLoading(false);
+    }
+  };
+
+  const updateAllApiAutoFixes = async (action: "approve" | "reject" | "commit") => {
+    if (!selectedApiValidation) return;
+    setIsApiAutoFixLoading(true);
+    try {
+      if (action === "commit") {
+        const result = await projectApi.commitApiAutoFix({ validationRunId: selectedApiValidation.id });
+        setApiAutoFixes((items) => items.map((item) => result.committed.find((payload) => payload?.fix.id === item.fix.id) ?? item));
+        toast.success(`Committed API fixes to ${result.branch}`);
+      } else {
+        const updated = action === "approve"
+          ? await projectApi.approveApiAutoFix({ validationRunId: selectedApiValidation.id })
+          : await projectApi.rejectApiAutoFix({ validationRunId: selectedApiValidation.id });
+        setApiAutoFixes((items) => items.map((item) => updated.find((payload) => payload?.fix.id === item.fix.id) ?? item));
+        toast.success(action === "approve" ? "All API fixes approved." : "All API fixes rejected.");
+      }
+      setApiAutoFixDashboard(await projectApi.getApiAutoFixDashboard(workspaceId).catch(() => null));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update API fixes.");
+    } finally {
+      setIsApiAutoFixLoading(false);
+    }
+  };
+
+  const retryAfterApiAutoFix = async () => {
+    if (!selectedApiValidation) return;
+    setIsApiAutoFixLoading(true);
+    try {
+      const ready = await projectApi.retryAfterApiAutoFix(selectedApiValidation.id);
+      toast.info(ready.message);
+      await retryApiGithubValidation();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to retry after API auto fix.");
+    } finally {
+      setIsApiAutoFixLoading(false);
+    }
+  };
+
+  const recalculateApiReleaseReadiness = async () => {
+    setIsApiReleaseLoading(true);
+    try {
+      const payload = await projectApi.recalculateApiReleaseReadiness({
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        apiWorkspaceId: selectedWorkspace?.id,
+        repositoryId: selectedApiRepository?.repositoryId ?? selectedApiRepository?.id,
+        releaseName: "API Release",
+        releaseVersion: new Date().toISOString().slice(0, 10),
+      });
+      setApiReleaseReadiness(payload);
+      toast.success("API release readiness recalculated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to recalculate API release readiness.");
+    } finally {
+      setIsApiReleaseLoading(false);
+    }
+  };
+
+  const generateApiReleaseRecommendation = async () => {
+    setIsApiReleaseLoading(true);
+    try {
+      const recommendation = await projectApi.generateApiReleaseRecommendation({
+        workspaceId,
+        projectId: projectId === "none" ? undefined : projectId,
+        apiWorkspaceId: selectedWorkspace?.id,
+        repositoryId: selectedApiRepository?.repositoryId ?? selectedApiRepository?.id,
+      });
+      toast.info(`${recommendation.releaseStatus}: ${recommendation.summary}`);
+      await loadApiReleaseReadiness(selectedWorkspace?.id, selectedApiRepository?.repositoryId ?? selectedApiRepository?.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to generate API release recommendation.");
+    } finally {
+      setIsApiReleaseLoading(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 rounded-[2rem] border bg-card/90 p-6 shadow-sm lg:flex-row lg:items-end lg:justify-between">
@@ -4656,6 +4801,162 @@ function ApiWorkspacePage({
           <Badge variant="outline" className={(highRiskCount + postmanHighRiskCount) ? "border-red-200 bg-red-50 text-red-700" : ""}>{highRiskCount + postmanHighRiskCount} high risk</Badge>
         </div>
       </div>
+
+      {apiReleaseReadiness && (
+        <Card className="overflow-hidden p-0">
+          <div className={cn("border-b p-5", apiReleaseStatusTone(apiReleaseReadiness.snapshot.releaseStatus))}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <Badge variant="outline" className="mb-3 bg-background/60">API Release Readiness</Badge>
+                <h2 className="font-display text-2xl font-semibold">{apiReleaseReadiness.snapshot.releaseStatus}</h2>
+                <p className="mt-1 max-w-3xl text-sm">{apiReleaseReadiness.snapshot.finalRecommendation}</p>
+              </div>
+              <div className="flex items-end gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide opacity-80">API Release Score</p>
+                  <p className="font-display text-5xl font-bold">{apiReleaseReadiness.snapshot.apiReleaseScore}</p>
+                </div>
+                <Badge variant="outline" className={apiReleaseRiskTone(apiReleaseReadiness.snapshot.riskLevel)}>
+                  {apiReleaseReadiness.snapshot.riskLevel} risk
+                </Badge>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-5 p-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <MiniStat label="AI Confidence" value={`${apiReleaseReadiness.snapshot.aiConfidence}%`} />
+              <MiniStat label="API Health" value={`${apiReleaseReadiness.snapshot.apiHealthScore}%`} />
+              <MiniStat label="Validation Success" value={`${apiReleaseReadiness.snapshot.validationSuccessRate}%`} />
+              <MiniStat label="Contract Compatibility" value={`${apiReleaseReadiness.snapshot.contractCompatibilityScore}%`} />
+              <MiniStat label="Coverage Score" value={`${apiReleaseReadiness.snapshot.apiCoverageScore}%`} />
+              <MiniStat label="Failed APIs" value={apiReleaseReadiness.snapshot.failedApisCount} />
+              <MiniStat label="High-Risk APIs" value={apiReleaseReadiness.snapshot.highRiskApisCount} />
+              <MiniStat label="Critical Issues" value={apiReleaseReadiness.snapshot.criticalIssuesCount} />
+              <MiniStat label="Breaking Changes" value={apiReleaseReadiness.snapshot.breakingChangesCount} />
+              <MiniStat label="Avg Response" value={`${apiReleaseReadiness.snapshot.averageResponseTime} ms`} />
+            </div>
+            <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">AI Recommendation</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{apiReleaseReadiness.snapshot.finalRecommendation}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void generateApiReleaseRecommendation()} disabled={isApiReleaseLoading}>
+                      {isApiReleaseLoading ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+                      Generate AI Recommendation
+                    </Button>
+                    <Button size="sm" onClick={() => void recalculateApiReleaseReadiness()} disabled={isApiReleaseLoading}>
+                      {isApiReleaseLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                      Recalculate
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-sm font-semibold">Reasons</p>
+                    <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+                      {apiReleaseReadiness.snapshot.reasons.map((reason) => (
+                        <li key={reason} className="flex gap-2">
+                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+                          <span>{reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">Recommended Actions</p>
+                    <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+                      {apiReleaseReadiness.snapshot.recommendedActions.map((action) => (
+                        <li key={action} className="flex gap-2">
+                          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
+                          <span>{action}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <p className="font-semibold">Release Timeline</p>
+                <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+                  {apiReleaseReadiness.timeline.slice(-10).map((item, index) => (
+                    <div key={`${item.label}-${item.timestamp}-${index}`} className="rounded-xl border bg-background p-3 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium">{item.label}</p>
+                        <Badge variant="outline">{item.status}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{formatDate(item.timestamp)} · {item.details}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-3">
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <p className="font-semibold">Validation Health</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <MiniStat label="Total" value={apiReleaseReadiness.sections.validationHealth.totalValidations} />
+                  <MiniStat label="Passed" value={apiReleaseReadiness.sections.validationHealth.passedValidations} />
+                  <MiniStat label="Failed" value={apiReleaseReadiness.sections.validationHealth.failedValidations} />
+                  <MiniStat label="Latest" value={apiReleaseReadiness.sections.validationHealth.latestValidationStatus} />
+                </div>
+                {apiReleaseReadiness.sections.validationHealth.latestWorkflowUrl && (
+                  <Button variant="outline" size="sm" className="mt-3" onClick={() => window.open(apiReleaseReadiness.sections.validationHealth.latestWorkflowUrl, "_blank")}>
+                    <ExternalLink className="size-4" />
+                    Open Workflow
+                  </Button>
+                )}
+              </div>
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <p className="font-semibold">Contract Health</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <MiniStat label="Compatibility" value={`${apiReleaseReadiness.sections.contractHealth.compatibilityScore}%`} />
+                  <MiniStat label="Failed" value={apiReleaseReadiness.sections.contractHealth.failedContractChecks} />
+                  <MiniStat label="Breaking" value={apiReleaseReadiness.sections.contractHealth.breakingChanges} />
+                  <MiniStat label="Type Mismatch" value={apiReleaseReadiness.sections.contractHealth.typeMismatches} />
+                </div>
+              </div>
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <p className="font-semibold">Coverage & Performance</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <MiniStat label="Endpoints" value={apiReleaseReadiness.sections.coverage.totalEndpoints} />
+                  <MiniStat label="Tested" value={apiReleaseReadiness.sections.coverage.testedEndpoints} />
+                  <MiniStat label="High-Risk Coverage" value={`${apiReleaseReadiness.sections.coverage.highRiskEndpointCoverage}%`} />
+                  <MiniStat label="p95" value={`${apiReleaseReadiness.sections.performance.p95ResponseTime} ms`} />
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <p className="font-semibold">Critical Issues</p>
+                <div className="mt-3 max-h-80 space-y-2 overflow-auto">
+                  {apiReleaseReadiness.snapshot.criticalIssues.length ? apiReleaseReadiness.snapshot.criticalIssues.map((issue) => (
+                    <div key={issue.id} className="rounded-xl border bg-background p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-medium">{issue.endpoint || "API release blocker"}</p>
+                        <Badge variant="outline" className={issue.severity === "Critical" ? "border-red-900 bg-red-900/10 text-red-900" : "border-red-500 bg-red-500/10 text-red-600"}>{issue.severity}</Badge>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">{issue.reason}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">Evidence: {issue.evidence}</p>
+                      <p className="mt-1 text-xs font-medium">Recommendation: {issue.recommendation}</p>
+                    </div>
+                  )) : <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No critical API release blockers detected.</p>}
+                </div>
+              </div>
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <p className="font-semibold">Root Cause Insights</p>
+                <div className="mt-3 max-h-80 space-y-2 overflow-auto">
+                  {apiReleaseReadiness.snapshot.rootCauseInsights.length ? apiReleaseReadiness.snapshot.rootCauseInsights.map((insight) => (
+                    <div key={insight} className="rounded-xl border bg-background p-3 text-sm text-muted-foreground">{insight}</div>
+                  )) : <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">No API failure root cause insights yet.</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.35fr]">
         <Card className="p-5">
@@ -5174,9 +5475,13 @@ function ApiWorkspacePage({
                       {isAnalyzingApiFailure ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
                       Analyze Failure
                     </Button>
-                    <Button variant="outline" disabled>
-                      <Wand2 className="size-4" />
-                      Generate Auto Fix Soon
+                    <Button
+                      variant="outline"
+                      onClick={() => void generateSelectedApiAutoFix(false)}
+                      disabled={isApiAutoFixLoading || !apiFailureAnalysis || !apiFailureAnalysis.autoFixPossible || apiFailureAnalysis.confidenceScore < 75}
+                    >
+                      {isApiAutoFixLoading ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
+                      Generate API Auto Fix
                     </Button>
                   </div>
                   <div className="rounded-xl border bg-background p-3 text-sm">
@@ -5275,13 +5580,144 @@ function ApiWorkspacePage({
                           <Copy className="size-4" />
                           Copy Summary
                         </Button>
-                        <Button variant="outline" disabled>
-                          <Wand2 className="size-4" />
-                          Generate AI Auto Fix Soon
+                        <Button
+                          variant="outline"
+                          onClick={() => void generateSelectedApiAutoFix(false)}
+                          disabled={isApiAutoFixLoading || !apiFailureAnalysis.autoFixPossible || apiFailureAnalysis.confidenceScore < 75}
+                        >
+                          {isApiAutoFixLoading ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
+                          Generate API Auto Fix
                         </Button>
                         <Button variant="outline" onClick={() => void retryApiGithubValidation()} disabled={isRunningApiValidation}>
                           <RefreshCw className="size-4" />
                           Retry Validation
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {apiAutoFixes.length > 0 && (
+                    <div className="space-y-4 rounded-2xl border bg-background p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <Badge variant="outline" className="mb-2 border-primary/30 bg-primary/10 text-primary">API Auto Fix</Badge>
+                          <h3 className="font-display text-lg font-semibold">Review AI-generated API fixes</h3>
+                          <p className="mt-1 text-sm text-muted-foreground">Approve fixes before committing them to the validation branch. AI QA Copilot never modifies production code automatically.</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" onClick={() => void generateSelectedApiAutoFix(true)} disabled={isApiAutoFixLoading}>
+                            {isApiAutoFixLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                            Regenerate Fix
+                          </Button>
+                          <Button variant="outline" onClick={() => void updateAllApiAutoFixes("approve")} disabled={isApiAutoFixLoading}>Approve All</Button>
+                          <Button variant="outline" onClick={() => void updateAllApiAutoFixes("reject")} disabled={isApiAutoFixLoading}>Reject All</Button>
+                          <Button onClick={() => void updateAllApiAutoFixes("commit")} disabled={isApiAutoFixLoading || !apiAutoFixes.some((item) => item.fix.status === "Approved" && !item.fix.committed)}>
+                            {isApiAutoFixLoading ? <Loader2 className="size-4 animate-spin" /> : <GitBranch className="size-4" />}
+                            Commit Approved
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <MiniStat label="Pending Fixes" value={apiAutoFixDashboard?.pendingFixes ?? apiAutoFixes.filter((item) => item.fix.status === "Pending").length} />
+                        <MiniStat label="Approved" value={apiAutoFixDashboard?.approvedFixes ?? apiAutoFixes.filter((item) => item.fix.status === "Approved").length} />
+                        <MiniStat label="Committed" value={apiAutoFixDashboard?.committedFixes ?? apiAutoFixes.filter((item) => item.fix.committed).length} />
+                        <MiniStat label="Avg Confidence" value={`${apiAutoFixDashboard?.averageAIConfidence ?? Math.round(apiAutoFixes.reduce((sum, item) => sum + item.fix.confidenceScore, 0) / Math.max(1, apiAutoFixes.length))}%`} />
+                      </div>
+                      <div className="space-y-4">
+                        {apiAutoFixes.map(({ fix, changes }) => (
+                          <div key={fix.id} className="rounded-xl border bg-muted/20 p-4">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div>
+                                <p className="font-mono text-sm font-semibold">{changes[0]?.filePath ?? "API validation asset"}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{fix.explanation}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="outline">{fix.status}</Badge>
+                                <Badge variant="outline">{fix.fixType}</Badge>
+                                <Badge variant="outline">{fix.confidenceScore}% confidence</Badge>
+                                <Badge variant="outline">{fix.repositoryMatchScore}% repo match</Badge>
+                              </div>
+                            </div>
+                            {changes[0] && (
+                              <div className="mt-3 rounded-lg border bg-background p-3 text-sm text-muted-foreground">
+                                <p><span className="font-semibold text-foreground">Endpoint:</span> {changes[0].endpoint || "Not mapped"}</p>
+                                <p className="mt-1"><span className="font-semibold text-foreground">Reason:</span> {changes[0].reason}</p>
+                              </div>
+                            )}
+                            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                              <div>
+                                <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Current Code</p>
+                                <pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{fix.beforeCode}</pre>
+                              </div>
+                              <div>
+                                <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">AI Suggested Code</p>
+                                <pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-emerald-100">{fix.afterCode}</pre>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button variant="outline" size="sm" onClick={() => void updateApiAutoFixStatus(fix.id, "approve")} disabled={isApiAutoFixLoading || fix.committed}>Approve Fix</Button>
+                              <Button variant="outline" size="sm" onClick={() => void updateApiAutoFixStatus(fix.id, "reject")} disabled={isApiAutoFixLoading || fix.committed}>Reject Fix</Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isApiAutoFixLoading || fix.committed}
+                                onClick={async () => {
+                                  const edited = window.prompt("Edit AI suggested code before approval", fix.afterCode);
+                                  if (!edited || edited === fix.afterCode) return;
+                                  setIsApiAutoFixLoading(true);
+                                  try {
+                                    const updated = await projectApi.editApiAutoFix(fix.id, edited);
+                                    setApiAutoFixes((items) => items.map((item) => item.fix.id === fix.id ? updated : item));
+                                    toast.success("API fix edited and marked for review.");
+                                  } catch (error) {
+                                    toast.error(error instanceof Error ? error.message : "Unable to edit API fix.");
+                                  } finally {
+                                    setIsApiAutoFixLoading(false);
+                                  }
+                                }}
+                              >
+                                <Pencil className="size-4" />
+                                Edit Before Apply
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(fix.afterCode);
+                                  toast.success("API fix copied.");
+                                }}
+                              >
+                                <Copy className="size-4" />
+                                Copy Code
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const blob = new Blob([fix.afterCode], { type: "text/plain" });
+                                  const url = URL.createObjectURL(blob);
+                                  const anchor = document.createElement("a");
+                                  anchor.href = url;
+                                  anchor.download = `${fix.fixType.toLowerCase().replace(/\s+/g, "-")}.patch.txt`;
+                                  anchor.click();
+                                  URL.revokeObjectURL(url);
+                                }}
+                              >
+                                <Download className="size-4" />
+                                Download Patch
+                              </Button>
+                            </div>
+                            {fix.committed && <p className="mt-3 text-xs font-semibold text-emerald-600">Committed to {fix.branch}. Commit: {fix.commitSha || "pending"}</p>}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-2 rounded-xl border bg-muted/20 p-3">
+                        <Button variant="outline" onClick={() => void retryAfterApiAutoFix()} disabled={isApiAutoFixLoading || isRunningApiValidation || !apiAutoFixes.some((item) => item.fix.committed)}>
+                          {isApiAutoFixLoading || isRunningApiValidation ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                          Retry Validation After Fix
+                        </Button>
+                        <Button variant="outline" onClick={() => void refreshApiValidation(selectedApiValidation.id)}>
+                          <History className="size-4" />
+                          View Validation History
                         </Button>
                       </div>
                     </div>
@@ -11263,6 +11699,20 @@ function apiRiskTone(risk: ApiAnalyticsSummary["summary"]["releaseRisk"]) {
   if (risk === "Low") return "border-success/40 bg-success/10 text-success";
   if (risk === "Medium") return "border-warning/40 bg-warning/10 text-warning";
   if (risk === "High") return "border-destructive/40 bg-destructive/10 text-destructive";
+  return "border-red-900/40 bg-red-900/10 text-red-900";
+}
+
+function apiReleaseStatusTone(status: ApiReleaseReadinessResponse["snapshot"]["releaseStatus"]) {
+  if (status === "READY") return "border-success/40 bg-success/10 text-success";
+  if (status === "READY WITH CAUTION") return "border-warning/40 bg-warning/10 text-warning";
+  if (status === "NOT READY") return "border-destructive/40 bg-destructive/10 text-destructive";
+  return "border-red-900/40 bg-red-900/10 text-red-900";
+}
+
+function apiReleaseRiskTone(risk: ApiReleaseReadinessResponse["snapshot"]["riskLevel"]) {
+  if (risk === "LOW") return "border-success/40 bg-success/10 text-success";
+  if (risk === "MEDIUM") return "border-warning/40 bg-warning/10 text-warning";
+  if (risk === "HIGH") return "border-destructive/40 bg-destructive/10 text-destructive";
   return "border-red-900/40 bg-red-900/10 text-red-900";
 }
 
