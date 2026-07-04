@@ -1,3 +1,3 @@
-export * from "./AuthLayout";
-export * from "./DashboardLayout";
-export * from "./LandingLayout";
+export * from "@/app/layouts/AuthLayout";
+export * from "@/app/layouts/DashboardLayout";
+export * from "@/app/layouts/LandingLayout";

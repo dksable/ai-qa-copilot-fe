@@ -1,1 +1,1 @@
-export * from "./AppProviders";
+export * from "@/app/providers/AppProviders";
