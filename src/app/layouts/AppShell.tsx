@@ -146,6 +146,7 @@ import {
   type ApiRepositoryDependencyGraph,
   type ApiRepositoryProfile,
   type ApiRepositoryRiskSummary,
+  type ApiRepositoryScanDebug,
   type ApiRouteMapping,
   type ApiRun,
   type ApiValidationMode,
@@ -4044,6 +4045,8 @@ function ApiWorkspacePage({
   const [apiRepositories, setApiRepositories] = useState<ApiRepositoryProfile[]>([]);
   const [selectedApiRepositoryId, setSelectedApiRepositoryId] = useState("");
   const [apiRouteMappings, setApiRouteMappings] = useState<ApiRouteMapping[]>([]);
+  const [apiRepositoryScanDebug, setApiRepositoryScanDebug] = useState<ApiRepositoryScanDebug | null>(null);
+  const [apiRepositoryTab, setApiRepositoryTab] = useState("map");
   const [apiDependencyGraph, setApiDependencyGraph] = useState<ApiRepositoryDependencyGraph[]>([]);
   const [apiRepositoryCoverage, setApiRepositoryCoverage] = useState<ApiRepositoryCoverage | null>(null);
   const [apiRepositoryRisk, setApiRepositoryRisk] = useState<ApiRepositoryRiskSummary | null>(null);
@@ -4241,6 +4244,7 @@ function ApiWorkspacePage({
       const scan = await projectApi.scanApiRepository(profile.id);
       setApiRepositories((items) => [scan.profile, ...items.filter((item) => item.id !== scan.profile.id)]);
       setApiRouteMappings(scan.mappings);
+      setApiRepositoryScanDebug(scan.scanDebug ?? null);
       setApiDependencyGraph(await projectApi.getApiRepositoryDependencyGraph(scan.profile.id));
       setApiRepositoryCoverage(await projectApi.getApiRepositoryCoverage(scan.profile.id));
       setApiRepositoryRisk(await projectApi.getApiRepositoryRiskSummary(scan.profile.id));
@@ -4259,6 +4263,7 @@ function ApiWorkspacePage({
       const scan = await projectApi.scanApiRepository(selectedApiRepository.id);
       setApiRepositories((items) => [scan.profile, ...items.filter((item) => item.id !== scan.profile.id)]);
       setApiRouteMappings(scan.mappings);
+      setApiRepositoryScanDebug(scan.scanDebug ?? null);
       setApiDependencyGraph(await projectApi.getApiRepositoryDependencyGraph(scan.profile.id));
       setApiRepositoryCoverage(await projectApi.getApiRepositoryCoverage(scan.profile.id));
       setApiRepositoryRisk(await projectApi.getApiRepositoryRiskSummary(scan.profile.id));
@@ -5199,12 +5204,13 @@ function ApiWorkspacePage({
               <MiniStat label="DTO/Schemas" value={selectedApiRepository?.dtoDirectories.length ?? 0} />
             </div>
 
-            <Tabs defaultValue="map">
-              <TabsList className="grid w-full grid-cols-4">
+            <Tabs value={apiRepositoryTab} onValueChange={setApiRepositoryTab}>
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="map">API Map</TabsTrigger>
                 <TabsTrigger value="graph">Dependency Graph</TabsTrigger>
                 <TabsTrigger value="impact">Impact</TabsTrigger>
                 <TabsTrigger value="coverage">Coverage</TabsTrigger>
+                <TabsTrigger value="debug">Scan Debug</TabsTrigger>
               </TabsList>
 
               <TabsContent value="map" className="mt-4">
@@ -5238,7 +5244,15 @@ function ApiWorkspacePage({
                         ))}
                       </tbody>
                     </table>
-                    {!apiRouteMappings.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">Scan a backend repository to detect API routes.</p>}
+                    {!apiRouteMappings.length && (
+                      <div className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+                        <p className="font-semibold text-foreground">No APIs detected.</p>
+                        <p className="mt-2">Possible reasons: route files were not found, Express routers could not be resolved, route syntax is not supported, or the repository branch may be incorrect.</p>
+                        <Button variant="outline" size="sm" className="mt-3" onClick={() => setApiRepositoryTab("debug")}>
+                          View Scan Debug
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </TabsContent>
@@ -5334,6 +5348,54 @@ function ApiWorkspacePage({
                       ))}
                     </div>
                   </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="debug" className="mt-4">
+                <div className="rounded-2xl border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">Repository Scan Debug</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Diagnostics from the latest API repository scan.</p>
+                    </div>
+                    <Badge variant="outline">{apiRepositoryScanDebug?.apisGenerated ?? 0} APIs generated</Badge>
+                  </div>
+                  {apiRepositoryScanDebug ? (
+                    <div className="mt-4 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <MiniStat label="Framework" value={apiRepositoryScanDebug.framework} />
+                        <MiniStat label="Entry File Found" value={apiRepositoryScanDebug.entryFileFound ?? "Not found"} />
+                        <MiniStat label="Route Files Found" value={apiRepositoryScanDebug.routeFilesFound} />
+                        <MiniStat label="app.use Mappings" value={apiRepositoryScanDebug.appUseMappingsFound} />
+                        <MiniStat label="Routers Resolved" value={apiRepositoryScanDebug.routersResolved} />
+                        <MiniStat label="Routes Parsed" value={apiRepositoryScanDebug.routesParsed} />
+                        <MiniStat label="APIs Generated" value={apiRepositoryScanDebug.apisGenerated} />
+                        <MiniStat label="Warnings" value={apiRepositoryScanDebug.warnings.length} />
+                      </div>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border bg-background p-3">
+                          <p className="text-sm font-semibold">Route Folders Found</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {apiRepositoryScanDebug.routeFoldersFound.map((folder) => (
+                              <Badge key={folder} variant="outline" className="font-mono text-[11px]">{folder}</Badge>
+                            ))}
+                            {!apiRepositoryScanDebug.routeFoldersFound.length && <p className="text-sm text-muted-foreground">No route folders detected.</p>}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border bg-background p-3">
+                          <p className="text-sm font-semibold">Warnings</p>
+                          <div className="mt-2 space-y-2">
+                            {apiRepositoryScanDebug.warnings.map((warning) => (
+                              <p key={warning} className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{warning}</p>
+                            ))}
+                            {!apiRepositoryScanDebug.warnings.length && <p className="text-sm text-muted-foreground">No scan warnings.</p>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-4 rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">Run a repository scan to view diagnostics.</p>
+                  )}
                 </div>
               </TabsContent>
             </Tabs>

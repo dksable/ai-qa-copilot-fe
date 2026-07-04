@@ -1669,9 +1669,13 @@ export interface ApiRouteMapping {
   repositoryId: string;
   method: string;
   path: string;
+  sourceFile?: string;
+  routerFile?: string;
+  basePath?: string;
   controllerFile?: string;
   controllerName?: string;
   handlerName?: string;
+  middleware?: string[];
   serviceFiles: string[];
   dtoFiles: string[];
   schemaFiles: string[];
@@ -1682,6 +1686,18 @@ export interface ApiRouteMapping {
   lineNumber?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiRepositoryScanDebug {
+  framework: ApiRepositoryFramework;
+  entryFileFound?: string;
+  routeFoldersFound: string[];
+  routeFilesFound: number;
+  appUseMappingsFound: number;
+  routersResolved: number;
+  routesParsed: number;
+  apisGenerated: number;
+  warnings: string[];
 }
 
 export interface ApiImpactAnalysis {
@@ -3095,7 +3111,7 @@ export const projectApi = {
   listApiRepositories: (workspaceId?: string) =>
     apiRequest<ApiRepositoryProfile[]>(`/api/api-repository${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`),
   scanApiRepository: (repositoryId: string) =>
-    apiRequest<{ profile: ApiRepositoryProfile; mappings: ApiRouteMapping[] }>(`/api/api-repository/${repositoryId}/scan`, { method: "POST" }),
+    apiRequest<{ profile: ApiRepositoryProfile; mappings: ApiRouteMapping[]; scanDebug?: ApiRepositoryScanDebug }>(`/api/api-repository/${repositoryId}/scan`, { method: "POST" }),
   getApiRepositorySummary: (repositoryId: string) => apiRequest<ApiRepositorySummary>(`/api/api-repository/${repositoryId}/summary`),
   listApiRepositoryEndpoints: (repositoryId: string) => apiRequest<ApiRouteMapping[]>(`/api/api-repository/${repositoryId}/endpoints`),
   getApiRepositoryDependencyGraph: (repositoryId: string) => apiRequest<ApiRepositoryDependencyGraph[]>(`/api/api-repository/${repositoryId}/dependency-graph`),
